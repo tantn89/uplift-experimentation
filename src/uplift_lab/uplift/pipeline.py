@@ -3,6 +3,8 @@
 The split is stratified by treatment x outcome so both sets keep the 85/15 assignment ratio and
 the per-arm outcome rate. Learners see only pre-treatment features; scores on the test set feed
 ``evaluate_scores`` together with a seeded random scoring as the random-targeting reference.
+The same split also runs the randomisation check in ``propensity.py`` (treatment predicted from
+the features, held-out AUC with a bootstrap CI).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from uplift_lab.experiments.estimators import FloatArray
 from uplift_lab.uplift.evaluation import DEFAULT_BUDGETS, RANDOM_SCORER, evaluate_scores
 from uplift_lab.uplift.features import binary_array, check_features
 from uplift_lab.uplift.learners import LEARNERS, LgbmParams, UpliftLearner, make_learner
+from uplift_lab.uplift.propensity import propensity_check
 
 
 @dataclass(frozen=True)
@@ -111,4 +114,16 @@ def run_uplift(
         alpha=config.alpha,
     )
     timings["evaluate_seconds"] = time.perf_counter() - start
+
+    start = time.perf_counter()
+    evaluation["propensity_check"] = propensity_check(
+        train,
+        test,
+        names,
+        params=config.params,
+        n_bootstrap=config.n_bootstrap,
+        seed=config.seed,
+        alpha=config.alpha,
+    )
+    timings["propensity_check_seconds"] = time.perf_counter() - start
     return UpliftRun(config, names, learners, scores, evaluation, len(train), len(test), timings)

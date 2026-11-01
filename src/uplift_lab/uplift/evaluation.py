@@ -5,6 +5,12 @@ policy value table per budget, each as ``{estimate, ci_low, ci_high}``; the aver
 effect; Qini and uplift curves on a fixed grid for plotting; and observed uplift by decile of
 predicted uplift. A model "beats random" when its Qini coefficient's interval excludes zero
 from above.
+
+The best model is the non-random scoring with the highest full-sample Qini coefficient. For
+every other scoring the payload also holds ``qini_diff_vs_best``: its Qini coefficient minus the
+best one's, computed on the same bootstrap draws (paired). The best model is a clear winner only
+when every other learner's difference interval lies below zero; otherwise the ranking between
+learners is within noise and no winner should be named.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from uplift_lab.uplift.policy import PolicyValue, average_treatment_effect, poli
 DEFAULT_BUDGETS = (0.1, 0.2, 0.3, 0.5)
 RANDOM_SCORER = "random"
 CURVE_GRID = np.linspace(0.0, 1.0, 101)
+QINI_DIFF = "qini_diff_vs_best"
 _SEP = "|"
 _POLICY_FIELDS = tuple(f.name for f in fields(PolicyValue) if f.name != "budget")
 
@@ -105,6 +112,8 @@ def evaluate_scores(
     rankings = {name: Ranking(values) for name, values in scores.items()}
     if any(r.size != t.size for r in rankings.values()) or y.size != t.size:
         raise ValueError("every scoring, treatment and outcome must have the same length")
+    candidates = [name for name in scores if name != RANDOM_SCORER] or list(scores)
+    best = max(candidates, key=lambda n: qini_coefficient(gains(rankings[n], t, y)))
 
     def statistic(weights: FloatArray | None) -> dict[str, float]:
         values: dict[str, float] = {}
@@ -113,17 +122,25 @@ def evaluate_scores(
             values["ate"] = average_treatment_effect(g)
             for key, value in _point_metrics(g, budgets).items():
                 values[f"{name}{_SEP}{key}"] = value
+        best_qini = values[f"{best}{_SEP}qini_coefficient"]
+        for name in rankings:
+            if name != best:
+                qini = values[f"{name}{_SEP}qini_coefficient"]
+                values[f"{QINI_DIFF}{_SEP}{name}"] = qini - best_qini
         return values
 
     intervals = bootstrap_intervals(statistic, t.size, n_boot=n_bootstrap, seed=seed, alpha=alpha)
     flat = {name: interval.to_dict() for name, interval in intervals.items()}
+    models = _nest(flat)
+    pairwise: dict[str, dict[str, float]] = models.pop(QINI_DIFF, {})
     payload: dict[str, Any] = {
         "n_test": int(t.size),
         "treated_share": float(t.mean()),
         "budgets": list(budgets),
         "bootstrap": {"n": n_bootstrap, "seed": seed, "alpha": alpha, "method": "percentile"},
-        "ate": flat.pop("ate"),
-        "models": _nest(flat),
+        "ate": models.pop("ate"),
+        "models": models,
+        QINI_DIFF: pairwise,
         "curves": {},
         "deciles": {},
     }
@@ -137,8 +154,10 @@ def evaluate_scores(
             "uplift": np.interp(CURVE_GRID, uplift_x, uplift_y).tolist(),
         }
         payload["deciles"][name] = decile_table(scores[name], t, y)
-    candidates = [name for name in scores if name != RANDOM_SCORER] or list(scores)
-    best = max(candidates, key=lambda n: payload["models"][n]["qini_coefficient"]["estimate"])
     payload["best_model"] = best
     payload["best_beats_random"] = payload["models"][best]["qini_coefficient"]["ci_low"] > 0.0
+    rivals = [name for name in candidates if name != best]
+    payload["best_is_clear_winner"] = bool(rivals) and all(
+        pairwise[name]["ci_high"] < 0.0 for name in rivals
+    )
     return payload

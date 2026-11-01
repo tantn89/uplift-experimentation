@@ -49,6 +49,11 @@ def test_report_writes_metrics_figures_and_model(frame: pd.DataFrame, tmp_path: 
     assert set(evaluation["models"]) == {*SMALL.learners, "random"}
     assert saved["model"]["kind"] == evaluation["best_model"] != "random"
     assert evaluation["best_beats_random"] is True
+    rivals = {*SMALL.learners, "random"} - {evaluation["best_model"]}
+    assert set(evaluation["qini_diff_vs_best"]) == rivals
+    assert isinstance(evaluation["best_is_clear_winner"], bool)
+    assert 0.4 < evaluation["propensity_check"]["auc"]["estimate"] < 0.6
+    assert "propensity_check_seconds" in saved["timings"]
     assert saved["dataset"]["n_rows"] == len(frame)
     assert len(saved["dataset"]["frame_sha256"]) == 64
     assert saved["mlflow"] is None

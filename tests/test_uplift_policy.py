@@ -104,8 +104,33 @@ def test_evaluate_scores_payload() -> None:
     assert ate["ci_low"] < ate["estimate"] < ate["ci_high"]
     assert len(payload["curves"]["oracle"]["qini"]) == 101
     assert payload["deciles"]["oracle"][0]["observed_uplift"] > ate["estimate"]
+    # Only the random scorer is a rival here, and it is excluded from the winner rule.
+    assert set(payload["qini_diff_vs_best"]) == {RANDOM_SCORER}
+    assert payload["qini_diff_vs_best"][RANDOM_SCORER]["ci_high"] < 0
+    assert payload["best_is_clear_winner"] is False
     with pytest.raises(ValueError, match="same length"):
         evaluate_scores({"a": tau[:-1]}, frame["treatment"], frame["visit"], n_bootstrap=2)
+
+
+def test_paired_qini_differences_separate_signal_from_noise() -> None:
+    frame = synthetic_uplift_frame(20_000, seed=8, treated_share=0.5)
+    tau = true_uplift(frame)
+    noise = np.random.default_rng(2).normal(scale=1e-6, size=tau.size)
+    scores = {"oracle": tau, "oracle_jitter": tau + noise, "weak": -tau}
+    payload = evaluate_scores(scores, frame["treatment"], frame["visit"], n_bootstrap=60, seed=3)
+    diffs = payload["qini_diff_vs_best"]
+    best = payload["best_model"]
+    assert best in {"oracle", "oracle_jitter"} and best not in diffs
+    twin = ({"oracle", "oracle_jitter"} - {best}).pop()
+    # A near-identical ranking: the paired interval is tight and covers zero.
+    assert diffs[twin]["ci_low"] <= 0.0 <= diffs[twin]["ci_high"] + 1e-12
+    assert diffs[twin]["ci_high"] - diffs[twin]["ci_low"] < 1e-3
+    assert diffs["weak"]["ci_high"] < 0
+    assert payload["best_is_clear_winner"] is False
+    clear = evaluate_scores(
+        {"oracle": tau, "weak": -tau}, frame["treatment"], frame["visit"], n_bootstrap=30, seed=3
+    )
+    assert clear["best_is_clear_winner"] is True
 
 
 def test_decile_table_partitions_rows() -> None:

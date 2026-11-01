@@ -124,6 +124,8 @@ def log_uplift_run(
     metrics = {
         **flatten_metrics({"ate": evaluation["ate"]}),
         **flatten_metrics(evaluation["models"]),
+        **flatten_metrics({"qini_diff_vs_best": evaluation["qini_diff_vs_best"]}),
+        **flatten_metrics({"propensity_auc": evaluation["propensity_check"]["auc"]}),
         **run.timings,
     }
     signature = ModelSignature(

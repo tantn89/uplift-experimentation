@@ -50,6 +50,13 @@ report writes `criteo-uplift.json` (Qini coefficient, AUUC, uplift@k and policy 
 1,000 contacts against treat-all and random, each with a bootstrap CI), Qini and
 uplift-by-decile PNGs, and the best model's serving directory `model/`.
 
+"Best" only means the highest point estimate. The report also gives a paired bootstrap CI
+(same draws) on each learner's Qini coefficient minus the best one's; `best_is_clear_winner`
+is true only if every one of those intervals excludes 0, and no winner is named otherwise.
+A randomisation check fits treatment ~ features on the training split and reports the held-out
+AUC with a bootstrap CI (`propensity_check`). 0.5 means assignment is unpredictable, as a
+clean RCT should be.
+
 ### Model artifact
 
 `model/` holds `manifest.json` and one LightGBM text model per component. The manifest

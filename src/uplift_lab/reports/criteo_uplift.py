@@ -124,7 +124,20 @@ def _summary_lines(payload: dict[str, Any]) -> list[str]:
             f"(treat-all {policy['treat_all_per_1000_contacts']['estimate']:.1f})"
         )
     lines.append(
-        f"best {payload['model']['kind']}, beats random: {evaluation['best_beats_random']}"
+        f"best {payload['model']['kind']}, beats random: {evaluation['best_beats_random']}, "
+        f"clear winner over the other learners: {evaluation['best_is_clear_winner']}"
+    )
+    for name, diff in evaluation["qini_diff_vs_best"].items():
+        lines.append(
+            f"  Qini {name} - best {diff['estimate']:+.5f} "
+            f"[{diff['ci_low']:+.5f}, {diff['ci_high']:+.5f}] (paired)"
+        )
+    check = evaluation["propensity_check"]
+    auc = check["auc"]
+    lines.append(
+        f"propensity AUC (treatment ~ features, test) {auc['estimate']:.4f} "
+        f"[{auc['ci_low']:.4f}, {auc['ci_high']:.4f}]; "
+        f"randomisation rejected: {check['randomisation_rejected']}"
     )
     if payload["mlflow"]:
         tracked = payload["mlflow"]
