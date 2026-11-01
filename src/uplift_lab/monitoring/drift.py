@@ -13,10 +13,18 @@ level ``ks_alpha / number of columns``.
 
 Prediction drift is the same pair of statistics on the model's uplift scores (column
 ``uplift``).
+
+**Decision rate** is the operational check: the share of traffic at or above a named budget's
+score threshold, divided by that budget. The threshold was set so that a ``budget`` share of
+held-out users clears it, so the ratio is 1 without drift. A ratio outside ``rate_warn`` warns
+and outside ``rate_alert`` alerts (defaults [0.75, 1.33] and [0.5, 1.5]): at 1.5 the campaign
+would overspend its budget by half. This catches a label or prior shift that moves the scores
+of many users a little, which PSI on coarse deciles of point-massed features can miss.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -38,17 +46,31 @@ class DriftThresholds:
     psi_warn: float = 0.1
     psi_alert: float = 0.2
     ks_alpha: float = 0.01
+    rate_warn: tuple[float, float] = (0.75, 1.33)
+    rate_alert: tuple[float, float] = (0.5, 1.5)
 
     def __post_init__(self) -> None:
         if not 0.0 < self.psi_warn < self.psi_alert:
             raise ValueError("need 0 < psi_warn < psi_alert")
         if not 0.0 < self.ks_alpha < 1.0:
             raise ValueError("ks_alpha must be in (0, 1)")
+        (alert_low, alert_high), (warn_low, warn_high) = self.rate_alert, self.rate_warn
+        if not 0.0 < alert_low <= warn_low < 1.0 < warn_high <= alert_high:
+            raise ValueError(
+                "decision-rate bounds need 0 < alert low <= warn low < 1 < warn high <= alert high"
+            )
 
     def status(self, psi: float) -> str:
         return "alert" if psi >= self.psi_alert else "warn" if psi >= self.psi_warn else "ok"
 
-    def to_dict(self) -> dict[str, float]:
+    def rate_status(self, ratio: float) -> str:
+        """Status of a decision-rate ratio (treat rate / budget); the bounds themselves are in."""
+        (alert_low, alert_high), (warn_low, warn_high) = self.rate_alert, self.rate_warn
+        if not alert_low <= ratio <= alert_high:
+            return "alert"
+        return "ok" if warn_low <= ratio <= warn_high else "warn"
+
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -122,20 +144,49 @@ def column_drift(
     }
 
 
-def drift_summary(
-    profile: ReferenceProfile, current: pd.DataFrame, thresholds: DriftThresholds
+def decision_rate_drift(
+    scores: ArrayLike, budget: float, threshold: float, t: DriftThresholds
 ) -> dict[str, Any]:
-    """Per-column drift of ``current`` against ``profile``; prediction drift if ``uplift`` given."""
+    """Share of ``scores`` at or above a budget's ``threshold``, against that ``budget``."""
+    if not 0.0 < budget <= 1.0 or not math.isfinite(threshold):
+        raise ValueError("need a budget in (0, 1] and a finite threshold")
+    rate = float(np.mean(_finite(scores, PREDICTION) >= threshold))
+    ratio = rate / budget
+    return {
+        "budget": budget,
+        "threshold": threshold,
+        "treat_rate": rate,
+        "ratio": ratio,
+        "status": t.rate_status(ratio),
+    }
+
+
+def drift_summary(
+    profile: ReferenceProfile,
+    current: pd.DataFrame,
+    thresholds: DriftThresholds,
+    decision: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    """Per-column drift of ``current`` against ``profile``; prediction drift if ``uplift`` given.
+
+    ``decision`` is ``(budget, threshold)`` of a named budget rule. It adds the decision-rate
+    check on the ``uplift`` column, and its status counts towards the overall one.
+    """
     columns = [c for c in profile.columns if c in current.columns]
     missing = sorted(set(profile.columns) - set(current.columns) - {PREDICTION})
     if missing or not columns:
         raise ValueError(f"current traffic is missing columns: {missing or profile.columns}")
+    if decision is not None and PREDICTION not in current.columns:
+        raise ValueError(f"the decision-rate check needs the {PREDICTION!r} column")
     level = thresholds.ks_alpha / len(columns)
     results = {c: column_drift(profile, c, current[c], level, thresholds) for c in columns}
     prediction = results.pop(PREDICTION, None)
-    statuses = [r["status"] for r in results.values()]
-    if prediction is not None:
-        statuses.append(prediction["status"])
+    rate = (
+        None
+        if decision is None
+        else decision_rate_drift(current[PREDICTION], *decision, thresholds)
+    )
+    statuses = [r["status"] for r in [*results.values(), prediction, rate] if r is not None]
     return {
         "n": len(current),
         "status": max(statuses, key=STATUSES.index),
@@ -143,6 +194,7 @@ def drift_summary(
         "ks_rejected_features": [name for name, r in results.items() if r["ks_reject"]],
         "features": results,
         "prediction": prediction,
+        "decision_rate": rate,
     }
 
 

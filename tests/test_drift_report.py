@@ -40,9 +40,11 @@ def test_scenarios_flag_the_expected_drift(report: dict[str, Any]) -> None:
     assert covariate["status"] == "alert"
     assert set(covariate["flagged_features"]) == {"f0", "f6"}  # synthetic features are independent
     assert covariate["prediction"]["status"] == "alert"  # the effect rises with f0
-    unshifted = scenarios["no_shift"]["treat_rate_at_budget"]
+    unshifted = scenarios["no_shift"]["decision_rate"]["treat_rate"]
     assert unshifted == pytest.approx(0.1, abs=0.015)
-    assert covariate["treat_rate_at_budget"] > 1.5 * unshifted  # the budget would overspend
+    assert scenarios["no_shift"]["decision_rate"]["status"] == "ok"
+    assert covariate["decision_rate"]["treat_rate"] > 1.5 * unshifted  # the budget would overspend
+    assert covariate["decision_rate"]["status"] == "alert"
     mix = scenarios["treatment_mix_shift"]
     assert mix["flagged_features"] == [] and mix["treated_share"] == pytest.approx(0.5, abs=0.02)
     prior = scenarios["outcome_prior_shift"]
@@ -56,11 +58,18 @@ def test_scenarios_flag_the_expected_drift(report: dict[str, Any]) -> None:
 def test_outputs_are_written_and_self_contained(report: dict[str, Any]) -> None:
     out: Path = report["dir"]
     saved = json.loads((out / "drift.json").read_text(encoding="utf-8"))
-    assert saved["thresholds"] == {"psi_warn": 0.1, "psi_alert": 0.2, "ks_alpha": 0.01}
+    assert saved["thresholds"] == {
+        "psi_warn": 0.1,
+        "psi_alert": 0.2,
+        "ks_alpha": 0.01,
+        "rate_warn": [0.75, 1.33],
+        "rate_alert": [0.5, 1.5],
+    }
     assert saved["model"]["kind"] == "s_learner"
     assert (out / "drift-psi.png").stat().st_size > 10_000
     markdown = (out / "drift-report.md").read_text(encoding="utf-8")
     assert "| covariate_shift | ALERT | f0, f6 |" in markdown
+    assert "x, ALERT) |" in markdown and "alert outside [0.5, 1.5]" in markdown
     page = (out / "drift-report.html").read_text(encoding="utf-8")
     assert "data:image/png;base64," in page and "<script" not in page and "http" not in page
 
@@ -110,6 +119,36 @@ def test_cli_runs_on_synthetic_data(tmp_path: Path, capsys: pytest.CaptureFixtur
     out = capsys.readouterr().out
     assert "covariate_shift" in out and "overall" in out
     assert (tmp_path / "drift-report.html").exists()
-    for bad in (["--covariate-features", "f99"], ["--psi-warn", "0.5"], ["--traffic-rows", "5"]):
+    for bad in (
+        ["--covariate-features", "f99"],
+        ["--psi-warn", "0.5"],
+        ["--traffic-rows", "5"],
+        ["--rate-warn", "1.1", "1.3"],
+        ["--expect", "no_shift=fine"],
+        ["--expect", "concept_shift=ok"],
+    ):
         with pytest.raises(SystemExit):
             drift.main([*args, *bad])
+
+
+def test_cli_expectations_gate_the_exit_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = ["--synthetic", "20000", "--traffic-rows", "5000", "--n-estimators", "30"]
+    args += ["--no-figures", "--output-dir", str(tmp_path)]
+    gate = ["--expect", "no_shift=ok", "--expect", "covariate_shift=alert"]
+    assert drift.main([*args, *gate]) == 0
+    assert drift.main([*args, "--expect", "no_shift=alert"]) == 1
+    assert (
+        "drift expectation failed: no_shift: status ok, expected alert" in capsys.readouterr().err
+    )
+    assert (tmp_path / "drift.json").exists()  # outputs are written even when the gate fails
+
+
+def test_unmet_expectations_names_missing_scenarios() -> None:
+    payload = {"scenarios": {"no_shift": {"status": "warn"}}}
+    expected = [("no_shift", "ok"), ("observed_traffic", "ok")]
+    assert drift.unmet_expectations(payload, expected) == [
+        "no_shift: status warn, expected ok",
+        "observed_traffic: not in this report",
+    ]

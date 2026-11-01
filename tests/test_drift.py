@@ -14,6 +14,7 @@ from uplift_lab.monitoring.drift import (
     DriftThresholds,
     ReferenceProfile,
     bin_shares,
+    decision_rate_drift,
     drift_summary,
     psi,
     quantile_edges,
@@ -100,7 +101,48 @@ def test_thresholds_validate_and_classify() -> None:
     assert [t.status(v) for v in (0.05, 0.1, 0.2, 0.25)] == ["ok", "warn", "warn", "alert"]
     for bad in ({"psi_warn": 0.3, "psi_alert": 0.2}, {"ks_alpha": 0.0}):
         with pytest.raises(ValueError):
-            DriftThresholds(**bad)
+            DriftThresholds(**bad)  # type: ignore[arg-type]
+
+
+def test_decision_rate_bounds_classify_and_validate() -> None:
+    t = DriftThresholds()
+    ratios = (0.49, 0.5, 0.74, 0.75, 1.0, 1.33, 1.34, 1.5, 1.51)
+    expected = ["alert", "warn", "warn", "ok", "ok", "ok", "warn", "warn", "alert"]
+    assert [t.rate_status(r) for r in ratios] == expected
+    narrow = DriftThresholds(rate_warn=(0.9, 1.1), rate_alert=(0.9, 1.1))  # no warn band
+    assert [narrow.rate_status(r) for r in (0.89, 1.0, 1.11)] == ["alert", "ok", "alert"]
+    for bad in (
+        {"rate_warn": (1.1, 1.3)},  # the band must contain 1
+        {"rate_warn": (0.4, 1.33)},  # warn wider than alert
+        {"rate_alert": (0.0, 1.5)},
+        {"rate_alert": (0.5, 1.2)},
+    ):
+        with pytest.raises(ValueError, match="decision-rate"):
+            DriftThresholds(**bad)  # type: ignore[arg-type]
+
+
+def test_decision_rate_catches_a_shift_that_psi_misses() -> None:
+    """Scores that all move up a little: PSI on deciles stays low, the treat rate does not."""
+    rng = np.random.default_rng(9)
+    reference = pd.DataFrame({"f0": rng.normal(size=50_000), "uplift": rng.normal(size=50_000)})
+    profile = ReferenceProfile.fit(reference, ["f0", "uplift"])
+    threshold = float(np.quantile(reference["uplift"], 0.9))  # a 10% budget
+    current = pd.DataFrame({"f0": rng.normal(size=20_000), "uplift": rng.normal(size=20_000)})
+    current["uplift"] += 0.28
+    summary = drift_summary(profile, current, DriftThresholds(), decision=(0.1, threshold))
+    rate = summary["decision_rate"]
+    assert summary["prediction"]["status"] == "ok"  # PSI below 0.1
+    assert rate["treat_rate"] == pytest.approx(0.158, abs=0.01)  # P(Z > 1.2816 - 0.28)
+    assert rate["ratio"] == pytest.approx(rate["treat_rate"] / 0.1)
+    assert rate["status"] == "alert" and summary["status"] == "alert"
+    unshifted = drift_summary(profile, reference, DriftThresholds(), decision=(0.1, threshold))
+    assert unshifted["decision_rate"]["ratio"] == pytest.approx(1.0, abs=1e-3)
+    assert unshifted["status"] == "ok"
+    assert drift_summary(profile, current, DriftThresholds())["decision_rate"] is None
+    with pytest.raises(ValueError, match="'uplift' column"):
+        drift_summary(profile, current[["f0"]], DriftThresholds(), decision=(0.1, threshold))
+    with pytest.raises(ValueError, match="budget"):
+        decision_rate_drift(current["uplift"], 0.0, threshold, DriftThresholds())
 
 
 def test_shift_scenarios_move_what_they_claim() -> None:

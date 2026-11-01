@@ -16,6 +16,13 @@ def _number(value: float | None, digits: int = 3) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
+def _decision_rate(rate: dict[str, Any] | None) -> str:
+    if rate is None:
+        return "-"
+    mark = {"ok": "", "warn": ", warn", "alert": ", ALERT"}[rate["status"]]
+    return f"{rate['treat_rate']:.3f} ({rate['ratio']:.2f}x{mark})"
+
+
 def summary_table(payload: dict[str, Any]) -> Table:
     header = [
         "Scenario",
@@ -23,7 +30,7 @@ def summary_table(payload: dict[str, Any]) -> Table:
         "PSI-flagged features",
         "KS-rejected",
         "Uplift-score PSI",
-        f"Treat rate @ budget {payload['decision']['budget']}",
+        f"Treat rate @ budget {payload['decision']['budget']} (x budget)",
         "Treated share",
     ]
     rows = []
@@ -36,7 +43,7 @@ def summary_table(payload: dict[str, Any]) -> Table:
                 ", ".join(s["flagged_features"]) or "none",
                 str(len(s["ks_rejected_features"])),
                 _number(prediction),
-                _number(s.get("treat_rate_at_budget")),
+                _decision_rate(s.get("decision_rate")),
                 _number(s.get("treated_share")),
             ]
         )
@@ -63,6 +70,7 @@ def psi_table(payload: dict[str, Any]) -> Table:
 def _intro(payload: dict[str, Any]) -> list[str]:
     t, model, ref = payload["thresholds"], payload["model"], payload["reference"]
     rows = payload["config"]["traffic_rows"]
+    (low_warn, high_warn), (low_alert, high_alert) = t["rate_warn"], t["rate_alert"]
     return [
         f"Overall status: {payload['overall_status'].upper()}.",
         f"Reference: {ref['n']:,} training rows; scenarios resample {rows:,} "
@@ -70,6 +78,10 @@ def _intro(payload: dict[str, Any]) -> list[str]:
         f"Model: {model['kind']} from {model['source']}.",
         f"PSI on reference deciles: warn >= {t['psi_warn']:g}, alert >= {t['psi_alert']:g}. "
         f"KS (Bonferroni alpha {t['ks_alpha']:g}) is reported, not alerted on.",
+        f"Decision rate: share of traffic at or above the budget-{payload['decision']['budget']} "
+        f"threshold ({payload['decision']['threshold']:.5f}) divided by the budget; "
+        f"warn outside [{low_warn:g}, {high_warn:g}], "
+        f"alert outside [{low_alert:g}, {high_alert:g}].",
     ]
 
 

@@ -101,9 +101,10 @@ and the Cloud Run commands (not deployed yet).
 
 `uplift-drift-report` compares traffic with the training reference. Each feature and the
 uplift score get a PSI on the reference deciles (warn >= 0.1, alert >= 0.2, configurable) and a
-two-sample KS test (reported, Bonferroni-corrected, never alerting on its own). It also reports
-the share of traffic above the 10%-budget score threshold. Seeded scenarios resample the
-held-out split:
+two-sample KS test (reported, Bonferroni-corrected, never alerting on its own). The decision
+rate is the operational check: the share of traffic at or above the 10%-budget score threshold,
+divided by 10%. It warns outside [0.75x, 1.33x] and alerts outside [0.5x, 1.5x] (configurable
+with `--rate-warn` and `--rate-alert`). Seeded scenarios resample the held-out split:
 
 - no shift;
 - a covariate tilt towards high `f0`/`f6`;
@@ -119,7 +120,22 @@ uplift-drift-report --synthetic 20000                         # no download; wha
 
 Outputs are `drift.json`, `drift-psi.png`, `drift-report.md` and a self-contained
 `drift-report.html`. CI builds the synthetic report and uploads it as the `drift-report`
-artifact.
+artifact. The same job is a regression gate: `--expect no_shift=ok --expect
+covariate_shift=alert` makes the command exit with 1 if either status changes.
+
+On Criteo (reference: the 700,000 training rows and the exported S-learner's scores; 50,000
+resampled held-out rows per scenario; budget-0.1 threshold 0.01496):
+
+| Scenario | Status | PSI-flagged features | Uplift-score PSI | KS-rejected (of 12) | Treat rate at 10% budget |
+|---|---|---|---|---|---|
+| No shift | ok | none | 0.000 | 0 | 0.098 (0.98x) |
+| Covariate tilt to high `f0`, `f6` (strength 2) | **alert** | f0 (0.203), f6 (0.201) | 0.188 (warn) | 10 | 0.045 (0.45x, alert) |
+| Treatment mix 50/50 | ok | none | 0.001 | 0 | 0.094 (0.94x) |
+| Visit rate 4.7% -> 13.9% (label shift) | **alert** | none (max 0.036) | 0.028 | 11 | 0.153 (1.53x, alert) |
+
+PSI on deciles misses the label shift: Criteo features have large point masses, so they get
+few bins. The decision rate catches it, because a 10% budget would treat 15.3% of traffic. Both
+alert margins are thin: f0/f6 sit just above 0.2, and 1.53x just above 1.5x.
 
 ## Development
 
