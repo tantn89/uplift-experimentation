@@ -76,6 +76,27 @@ no longer accepts a plain `./mlruns` file store by default. The best model is re
 same code at another server, e.g. Databricks (`databricks`, `databricks-uc`, a workspace
 experiment path, `catalog.schema.model`).
 
+## Serving
+
+`uplift_lab.serving` is a FastAPI app (`serve` extra) with `GET /health`, `POST /score` (uplift
+per customer) and `POST /decide` (treat/skip under a named budget threshold from the manifest,
+or for the top share of a batch). Rows must carry exactly `f0`-`f11`. `exposure`, treatment and
+outcome fields are rejected with 422, and batches are capped at 1,000 rows. The model loads
+once at startup from `UPLIFT_LAB_MODEL_DIR`, or from an MLflow URI in `UPLIFT_LAB_MODEL_URI`
+such as `models:/uplift-criteo-visit@champion`. Sampled traffic can be logged to JSONL for
+drift checks.
+
+```bash
+UPLIFT_LAB_MODEL_DIR=reports/criteo-uplift/model \
+  uvicorn uplift_lab.serving.app:create_app --factory --port 8000
+uplift-serve-benchmark --url http://127.0.0.1:8000     # p50/p95 for /score and /decide
+docker build -t uplift-serve . && docker run --rm -p 8080:8080 uplift-serve
+```
+
+The image bakes the exported model directory in, runs as a non-root user and has no MLflow.
+See [docs/deployment-guide.md](docs/deployment-guide.md) for configuration, the Docker design
+and the Cloud Run commands (not deployed yet).
+
 ## Development
 
 ```bash

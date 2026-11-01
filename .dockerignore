@@ -1,0 +1,10 @@
+# Allow-list: the image needs the package sources, build metadata and one exported model only.
+# Data, MLflow stores, reports and local environments never enter the build context.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+!reports/criteo-uplift/model/
+**/__pycache__
+**/*.py[cod]
