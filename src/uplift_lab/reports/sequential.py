@@ -94,8 +94,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"price of peeking: mSPRT reaches {price['target_power']:.0%} power with a cap of "
             f"{price['msprt_cap_per_arm']:,} per arm ({price['cap_ratio_vs_fixed']:.2f}x the fixed "
-            f"horizon); mean n {price['msprt_mean_n_per_arm_under_cap']:,.0f} "
-            f"({price['mean_n_ratio_vs_fixed']:.2f}x), type-I "
+            f"horizon); mean n under the alternative "
+            f"{price['msprt_mean_n_per_arm_under_cap']:,.0f} "
+            f"({price['mean_n_ratio_vs_fixed']:.2f}x), under the null "
+            f"{price['msprt_mean_n_per_arm_under_null']:,.0f} "
+            f"({price['mean_n_ratio_vs_fixed_under_null']:.2f}x); type-I "
             f"{price['msprt_type_one_error_under_cap']:.4f}"
         )
     print(f"wrote {args.output_dir}")

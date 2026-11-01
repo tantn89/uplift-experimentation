@@ -55,6 +55,13 @@ def test_msprt_needs_a_larger_cap_for_the_fixed_tests_power(price: dict[str, Any
     assert power[cap_index] >= 0.8 > power[cap_index - 1]
     # It stops early often enough that the average run is far below the cap.
     assert price["msprt_mean_n_per_arm_under_cap"] < price["msprt_cap_per_arm"]
+    # Under the null it almost never stops, so it runs to (nearly) the cap.
+    null_n = price["msprt_mean_n_per_arm_under_null"]
+    assert price["msprt_mean_n_per_arm_under_cap"] < null_n <= price["msprt_cap_per_arm"]
+    assert null_n > 0.95 * price["msprt_cap_per_arm"]
+    assert price["mean_n_ratio_vs_fixed_under_null"] == pytest.approx(
+        null_n / price["fixed_horizon_per_arm"]
+    )
 
 
 def test_larger_cap_keeps_msprt_valid(price: dict[str, Any]) -> None:

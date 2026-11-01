@@ -8,8 +8,12 @@ runs that have rejected by that look. The price is the first cap at which that s
 target, relative to the fixed horizon.
 
 Because mSPRT stops as soon as the evidence is strong, its *expected* sample size under that cap
-can still be below the fixed horizon. Both numbers are reported, plus mSPRT's type-I error under
-the same cap (a fresh A/A simulation) to show the larger cap costs no validity.
+is well below the cap. It is not necessarily below the fixed horizon: with the default design it
+is about 1.12x the fixed horizon under the alternative, so the peek-safe test uses about 12%
+more units on average than the fixed test to reach the same power. Under the null it rarely
+stops, so it runs to (nearly) the full cap. All three numbers are reported (cap, expected n
+under the alternative, expected n under the null), plus mSPRT's type-I error under the same cap
+(a fresh A/A simulation) to show the larger cap costs no validity.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from dataclasses import replace
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from uplift_lab.experiments.peeking_simulation import PeekingConfig, simulate_peeking
 
@@ -57,22 +62,36 @@ def price_of_peeking(
         "cap_ratio_vs_fixed": None,
         "msprt_mean_n_per_arm_under_cap": None,
         "mean_n_ratio_vs_fixed": None,
+        "msprt_mean_n_per_arm_under_null": None,
+        "mean_n_ratio_vs_fixed_under_null": None,
         "msprt_type_one_error_under_cap": None,
     }
     if reached.size == 0:
         return payload  # not reached within max_horizon_factor x the fixed horizon
     last = int(reached[0])
     cap = int(alternative.looks_n[last])
-    first = alternative.first_rejection["msprt"]
-    stops = np.where((first >= 0) & (first <= last), alternative.looks_n[np.maximum(first, 0)], cap)
+    stops = _stop_n(alternative.first_rejection["msprt"], alternative.looks_n, last)
     null = simulate_peeking(
         replace(extended, looks=last + 1, seed=config.seed + 3), 0.0, tau=effect
     )
+    null_stops = _stop_n(null.first_rejection["msprt"], null.looks_n, last)
     payload.update(
         msprt_cap_per_arm=cap,
         cap_ratio_vs_fixed=cap / config.horizon_per_arm,
         msprt_mean_n_per_arm_under_cap=float(stops.mean()),
         mean_n_ratio_vs_fixed=float(stops.mean()) / config.horizon_per_arm,
+        msprt_mean_n_per_arm_under_null=float(null_stops.mean()),
+        mean_n_ratio_vs_fixed_under_null=float(null_stops.mean()) / config.horizon_per_arm,
         msprt_type_one_error_under_cap=null.rejection_rate("msprt"),
     )
     return payload
+
+
+def _stop_n(first: NDArray[np.int64], looks_n: NDArray[np.int64], last: int) -> NDArray[np.float64]:
+    """Per-arm sample size at which each run stops under a cap at look ``last``.
+
+    A run stops at its first rejection if that comes by the cap, otherwise at the cap.
+    """
+    cap = looks_n[last]
+    rejected = (first >= 0) & (first <= last)
+    return np.where(rejected, looks_n[np.maximum(first, 0)], cap).astype(np.float64)
