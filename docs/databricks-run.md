@@ -177,9 +177,9 @@ non-significant margin.
 
 The model is `workspace.uplift_lab.uplift_criteo_visit` version 2, alias `champion`, from MLflow
 run `8f6eb8549a03402abff84ed8bfb03f9a`. It is a transformed-outcome learner whose manifest records
-the git SHA, dataset checksums and budget thresholds. Version 1 comes from a 50,000-row smoke
-run (job run `582390254126661`, 20 draws) that tested the environment and the Unity Catalog path
-before the full run. It is not the champion.
+the git SHA, dataset checksums and budget thresholds. Version 1 was a 50,000-row smoke
+run that tested the environment and the Unity Catalog path before the full run. It was deleted
+afterwards, together with its Volume outputs, so version 2 is the only version left.
 
 ## Limits hit
 
