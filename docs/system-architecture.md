@@ -69,24 +69,44 @@ cap at look k.
 **Uplift evaluation.** Curves are per population user, against the targeted fraction. Ties are
 evaluated at the ends of tie groups, so results do not depend on row order. The bootstrap is
 expressed as multiplicity weights over one precomputed sort per model. Every statistic in a draw
-therefore sees the same resample, which makes the differences between models paired. Policy value
-is the within-segment difference in means (Hajek). Horvitz-Thompson IPW with a constant propensity
-is kept as a secondary column, because treatment is slightly predictable from the features: AUC
-0.5105 [0.5098, 0.5112] on the full data. This is checked by `uplift/propensity.py`.
+therefore sees the same resample, which makes the differences between models paired. A replicate
+that happens to lose an arm is NaN and dropped; the original sample must contain both arms. The
+intervals hold the fitted models fixed and resample the test set only, so they cover test-set
+sampling noise, not the variance of refitting on another training sample. Policy value is the
+within-segment difference in means (Hajek). It is less biased than Horvitz-Thompson IPW with one
+constant propensity, which stays a secondary column because treatment is slightly predictable
+from the features (AUC about 0.51 on the full data, checked by `uplift/propensity.py`). It is not
+unbiased if the treated share varies inside a segment; AIPW or propensity strata are on the
+roadmap.
+
+**Model selection (`uplift/champion.py`).** The paired Qini differences against the best learner
+get two-sided bootstrap p-values, Holm-corrected across the learners. The best learner is a clear
+winner only if every corrected difference is significant. The registered model, the champion, is
+chosen by a rule fixed before the data: the clear winner if there is one, otherwise the first
+learner that is not significantly worse than the best in the order S > T > X > transformed
+outcome. S and T never use the propensity, X only as a blending weight, and the transformed
+outcome weights every row by one constant propensity, which the randomisation check shows is
+slightly wrong. The evaluation, the manifest and the MLflow tags record the rule and the reason.
 
 **Drift.** PSI uses the unique reference deciles, right-closed bins and an epsilon floor. KS is
-scipy's two-sample test with a Bonferroni correction; it is reported but never alerts alone. The
+scipy's two-sample test with a Bonferroni correction over every tested column (13 on Criteo: 12
+features and the uplift score); it is reported but never alerts alone. The
 decision rate is the share of traffic at or above the 10%-budget score threshold, divided by the
 budget. It is the operational signal: it caught the simulated label shift that PSI missed. A
 scenario's status is the worst over features, prediction and decision rate.
 
-**Metric gate.** The data (a seeded synthetic RCT with a known effect) and the evaluation settings
-are fingerprinted. The frame hash is taken after rounding to 9 decimals, because numpy's normal
-sampler calls libm in its tail and one value in 10^5 differed in the last bit between Windows and
-Linux. Model settings are not fingerprinted; they are what the gate judges. The rules:
-- a regression is a head estimate below the baseline's lower 95% bootstrap bound;
+**Metric gate.** The data (a seeded synthetic RCT with a known effect), the evaluation settings
+and the versions of LightGBM, numpy, pandas and scikit-learn are fingerprinted; CI installs the
+pinned set in `evals/metric-gate-constraints.txt`. The frame hash is taken after rounding to 9
+decimals, because numpy's normal sampler calls libm in its tail and one value in 10^5 differed in
+the last bit between Windows and Linux. Model settings are not fingerprinted; they are what the
+gate judges. The baseline stores every bootstrap draw's value, and the seeded draws resample the
+same test rows on every run, so head and baseline are compared pairwise. The rules:
+- a regression is a head-minus-baseline interval (paired draws) entirely below 0, with a drop of
+  more than 2% of the baseline estimate. The floor stops a negligible but consistent shift, such
+  as a platform difference that moves one split, from failing the build;
 - a Qini interval that no longer excludes 0 fails;
-- an estimate above the upper bound is an improvement and passes.
+- the same conditions in the other direction are an improvement and pass.
 
 ## Model artifact and serving
 
@@ -94,7 +114,9 @@ The serving contract is a directory: `manifest.json` (format `uplift-lab.uplift-
 version 1, kind, ordered features, propensity, booster file names, metadata with budget thresholds,
 checksums and git SHA) plus one LightGBM text model per component. `load_learner` validates the
 manifest, refuses path traversal in file names and re-applies the leakage guard. It never unpickles.
-The MLflow pyfunc is logged as models-from-code and wraps the same directory. The service can
+The MLflow pyfunc is logged as models-from-code and wraps the same directory. It carries the
+`uplift_lab` source as `code_paths` and pins the package's core dependencies, so the registered
+model loads in an environment that has only its `requirements.txt`. The service can
 resolve a registry URI with `mlflow-skinny`, but by default the model is baked into the image:
 - no registry credentials at runtime;
 - no network at startup;
@@ -112,7 +134,7 @@ data. It also fixed a 500 that a JSON `NaN` caused in FastAPI's default handler.
 |---|---|---|
 | In-house S/T/X/transformed outcome on LightGBM | causalml, scikit-uplift | At the 2026-11-01 spike, causalml had cp311/cp312 wheels only, and scikit-uplift (last release 2022) calls a helper removed in scikit-learn 1.10. The in-house code matched both to four decimals |
 | In-house PSI and KS | Evidently | Evidently 0.7.23 failed to import with pandas 3 and added about 200 MB; the PSI the design needs is a few lines |
-| In-house metric gate | regressgate | regressgate gates stochastic pass/fail trials with permutation and Fisher tests. This pipeline is deterministic, with continuous metrics, so the rule uses the baseline's own bootstrap interval |
+| In-house metric gate | regressgate | regressgate gates stochastic pass/fail trials with permutation and Fisher tests. This pipeline is deterministic, with continuous metrics, so the rule bootstraps the head-minus-baseline difference on the same seeded draws |
 | Core = numpy, pandas, LightGBM, platformdirs | One dependency list | The serving image skips the `analysis` extra (pyarrow, scikit-learn, statsmodels): 1.01 GB to 621 MB, cold start 2.1 s to 1.2 s |
 | sqlite MLflow store locally | `./mlruns` file store | MLflow 3.17 refuses the plain file store by default |
 | Hugging Face Criteo mirror at a pinned revision | go.criteo.net | The official links returned 404 at the spike |

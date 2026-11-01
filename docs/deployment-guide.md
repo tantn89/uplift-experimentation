@@ -79,7 +79,8 @@ and pyarrow and `scipy.stats` are imported inside the functions that use them. s
 stays, because LightGBM requires it. `tests/test_serving_imports.py` serves `/health`, `/score`
 and `/decide` with those modules blocked, so a new top-level import fails the tests.
 
-Measured on Docker Desktop (Windows 11, WSL 2), `--cpus 1 --memory 512m`, same baked model:
+Measured on Docker Desktop (Windows 11, WSL 2), `--cpus 1 --memory 512m`, same baked model (an
+export from before the current v4 champion; not yet re-measured with it):
 
 | | Before (all dependencies) | Now (core + `serve`) |
 |---|---|---|
@@ -121,12 +122,21 @@ for Cloud Run.
 These commands target project `filings-copilot` in `asia-southeast1`. They create billable
 resources.
 
-### Live deployment (2026-11-01)
+### Pending redeploy with the new champion
+
+The registered champion is now Unity Catalog version 4: the full-data S-learner from job run
+`369767185615309`, git SHA `4238f32`, chosen by the pre-declared champion rule (see
+[databricks-run.md](databricks-run.md)). Cloud Run will be redeployed with it, baked with
+`--build-arg MODEL_DIR=reports/databricks/369767185615309/model`. Until then the live service
+still runs the earlier model below, and the numbers in this section are historical measurements
+of that deployment.
+
+### Live deployment (2026-11-01, historical: previous model)
 
 The commands below were run as written, except that the build baked the model trained on the
 full Criteo data on Databricks:
 `--build-arg MODEL_DIR=reports/databricks/286670365587179/model`. That is the transformed-outcome
-learner, git SHA `740f074`; see [databricks-run.md](databricks-run.md).
+learner (Unity Catalog version 2), git SHA `740f074`; see [databricks-run.md](databricks-run.md).
 
 - **Service:** `uplift-serve`, revision `uplift-serve-00001-bbc`. Image `uplift-serve:0.1.0`.
 - **Access:** an anonymous call gets 403; an identity token gets 200.

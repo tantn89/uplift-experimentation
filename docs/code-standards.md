@@ -24,7 +24,8 @@ before every commit.
   unbiasedness over many seeded replicates, parity with scipy or statsmodels, closed forms. State
   the tolerance's reasoning in a comment (the standard error of the simulated quantity).
 - **Intervals before rankings.** Comparisons between models use paired bootstrap differences. A
-  winner is named only when the interval excludes 0.
+  winner is named only when every difference is significant after Holm correction. The model to
+  register follows the pre-declared rule in `uplift/champion.py`, never an ad hoc choice.
 - **Pre-treatment features only.** New features go through `uplift/features.py`. Post-treatment
   fields (`exposure`) and labels are rejected, never silently dropped.
 - **Report honestly.** If a method does not help on the data (CUPED on Hillstrom), the report and
@@ -50,8 +51,9 @@ before every commit.
 
 Conventional commits (`feat`, `fix`, `test`, `docs`, `ci`, `build`, `refactor`), imperative
 subject, optional scope (for example `feat(uplift): ...`). One concern per commit; the body
-explains the why. A change to the metric-gate data or evaluation settings refreshes
-`evals/metric-gate-baseline.json` in the same commit.
+explains the why. A change to the metric-gate data, evaluation settings or pinned library
+versions refreshes `evals/metric-gate-baseline.json` (and `evals/metric-gate-constraints.txt`)
+in the same commit.
 
 ## Documentation
 

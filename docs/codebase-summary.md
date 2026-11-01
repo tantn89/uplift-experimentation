@@ -10,7 +10,7 @@ under `src/`, built with hatchling. The version is in `src/uplift_lab/__init__.p
 |---|---|
 | `data/` | `cache.py` (fetch, SHA-256 verify, cache dir), `hillstrom.py`, `criteo.py` (pinned source, seeded stratified 1M subsample), `sampling.py`, `synthetic.py` (Criteo-shaped RCT with a known CATE, used by tests, the CI drift job and the metric gate) |
 | `experiments/` | `estimators.py` (Welch), `cuped.py`, `srm.py`, `power.py`, `msprt.py`, `peeking_simulation.py`, `peeking_price.py`, `cuped_simulation.py` |
-| `uplift/` | `learners.py` (S, T, X, transformed outcome), `metrics.py` (Qini, AUUC, uplift@k), `policy.py`, `bootstrap.py`, `evaluation.py`, `pipeline.py`, `propensity.py`, `features.py` (leakage guard), `artifacts.py`, `provenance.py`, `tracking.py` and `pyfunc_model.py` (MLflow) |
+| `uplift/` | `learners.py` (S, T, X, transformed outcome), `metrics.py` (Qini, AUUC, uplift@k), `policy.py`, `bootstrap.py` (draws, percentile intervals, p-values, Holm), `evaluation.py`, `champion.py` (the pre-declared rule for the registered model), `pipeline.py`, `propensity.py`, `features.py` (leakage guard), `artifacts.py`, `provenance.py`, `tracking.py` and `pyfunc_model.py` (MLflow) |
 | `pipelines/` | `criteo_full_data.py` (verified full-file reader), `criteo_full_training.py` (full-data job, local or Databricks) |
 | `serving/` | `app.py` (FastAPI), `schemas.py`, `model_service.py`, `model_source.py` (directory or MLflow URI), `settings.py` (env), `benchmark.py` |
 | `monitoring/` | `drift.py` (PSI, KS, decision rate, thresholds), `shift_simulation.py` (seeded scenarios), `traffic_log.py` |
@@ -50,8 +50,9 @@ models.
 
 | Path | Purpose |
 |---|---|
-| `evals/metric-gate-baseline.json` | Committed metric-gate baseline (refresh with `uplift-metric-gate --update-baseline`) |
+| `evals/metric-gate-baseline.json` | Committed metric-gate baseline with every bootstrap draw (refresh with `uplift-metric-gate --update-baseline`) |
+| `evals/metric-gate-constraints.txt` | The library versions that built the baseline; the CI gate job installs with `-c` this file |
 | `Dockerfile`, `.dockerignore` | Two-stage, non-root serving image with the model baked in; the ignore file is an allow-list |
-| `databricks.yml`, `databricks/` | Asset bundle and job entry for the full-data run |
+| `databricks.yml`, `databricks/` | Asset bundle, job entry for the full-data run, and `build_wheel.py` (empties `dist/`, records the git SHA and dirty flag in the wheel) |
 | `.github/workflows/ci.yml` | Jobs `lint-and-types`, `tests` (3.11, 3.13), `drift-report`, `metric-gate`, optional `mlflow-round-trip` |
 | `tests/` | Unit and statistical tests on synthetic data; `-m network` runs the real-data tests |
