@@ -38,6 +38,8 @@ mlflow = ["mlflow>=3.0,<4"]
 serve = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2.8"]
 report = ["matplotlib>=3.8"]
 dev = [
+  "uplift-lab[serve]",
+  "httpx2>=2.9",  # Starlette's TestClient transport (replaces httpx there)
   "matplotlib>=3.8",
   "mypy>=1.11",
   "pandas-stubs>=2.2",
