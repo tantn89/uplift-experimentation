@@ -45,6 +45,8 @@ jobs:
       - run: pytest -rxXs --cov=uplift_lab --cov-report=term-missing
 
   # The drift report on seeded synthetic data (no dataset download), kept as a build artifact.
+  # It is also a regression gate: the job fails if unshifted traffic is not "ok" or the
+  # covariate shift is not "alert". The artifact is uploaded either way, for inspection.
   drift-report:
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +60,9 @@ jobs:
       - run: >-
           uplift-drift-report --synthetic 20000 --traffic-rows 5000 --n-estimators 50
           --output-dir reports/drift
-      - uses: actions/upload-artifact@v4
+          --expect no_shift=ok --expect covariate_shift=alert
+      - if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: drift-report
           path: reports/drift
