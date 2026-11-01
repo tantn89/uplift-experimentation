@@ -21,6 +21,20 @@ Nothing is committed. Datasets download on first use into a per-user cache (over
 Criteo data: Diemert, Betlei, Renaudin and Amini, *A Large Scale Benchmark for Uplift
 Modeling*, AdKDD 2018. Use is non-commercial; this repository ships code only.
 
+## Reports
+
+Each report writes JSON metrics and PNG figures into `reports/` (git-ignored). Figures need the
+`report` extra (`python -m pip install -e ".[report]"`).
+
+```bash
+uplift-hillstrom-report      # Welch effects, CUPED, SRM and power on Hillstrom -> reports/hillstrom
+uplift-sequential-report     # seeded peeking simulation, naive t-test vs mSPRT -> reports/sequential
+uplift-sequential-report --large   # 20,000 runs x 100 looks instead of 10,000 x 20
+```
+
+Both are also runnable as `python -m uplift_lab.reports.hillstrom` and
+`python -m uplift_lab.reports.sequential`.
+
 ## Development
 
 ```bash

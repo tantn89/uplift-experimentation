@@ -36,7 +36,9 @@ dependencies = [
 [project.optional-dependencies]
 mlflow = ["mlflow>=3.0,<4"]
 serve = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2.8"]
+report = ["matplotlib>=3.8"]
 dev = [
+  "matplotlib>=3.8",
   "mypy>=1.11",
   "pandas-stubs>=2.2",
   "pytest>=8.3",
@@ -44,6 +46,10 @@ dev = [
   "ruff>=0.6",
   "scipy-stubs>=1.13",
 ]
+
+[project.scripts]
+uplift-hillstrom-report = "uplift_lab.reports.hillstrom:main"
+uplift-sequential-report = "uplift_lab.reports.sequential:main"
 
 [project.urls]
 Homepage = "https://github.com/tantn89/uplift-experimentation"
