@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 # Scoring service image: a built uplift-lab wheel with the serve extra plus one baked-in,
 # pickle-free model directory (manifest.json + LightGBM text models). See docs/deployment-guide.md.
+# Core dependencies plus `serve` only: the analysis extra (pyarrow, scikit-learn, statsmodels) and
+# matplotlib stay out, because the serving import path never touches them.
 #
 #   uplift-criteo-report                       # exports reports/criteo-uplift/model
 #   docker build -t uplift-serve .

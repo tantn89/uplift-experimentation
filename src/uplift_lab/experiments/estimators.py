@@ -4,6 +4,9 @@ The estimand is the average treatment effect of assignment (intent to treat): th
 minus the control mean. Inference uses Welch's t with Welch-Satterthwaite degrees of freedom, so
 it stays valid when the arms have different variances (spend is far noisier when e-mailed).
 The relative lift ``mean_t / mean_c - 1`` gets a delta-method interval.
+
+``scipy.stats`` is imported inside the functions: ``FloatArray`` is used across the package,
+including the serving path, which should not pay for importing scipy.stats.
 """
 
 from __future__ import annotations
@@ -12,7 +15,6 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy import stats
 
 FloatArray = NDArray[np.float64]
 
@@ -65,6 +67,8 @@ def welch_difference(
     treated: ArrayLike, control: ArrayLike, *, alpha: float = 0.05
 ) -> EffectEstimate:
     """Estimate ``mean(treated) - mean(control)`` with a Welch t interval and p-value."""
+    from scipy import stats
+
     _check_alpha(alpha)
     y_t = as_float_array(treated, "treated")
     y_c = as_float_array(control, "control")
@@ -103,6 +107,8 @@ def _relative_lift(
     mean_t: float, mean_c: float, var_mean_t: float, var_mean_c: float, alpha: float
 ) -> tuple[float, float, float]:
     """Delta-method interval for ``mean_t / mean_c - 1`` (independent arms); NaN if mean_c = 0."""
+    from scipy import stats
+
     if mean_c == 0.0:
         return float("nan"), float("nan"), float("nan")
     ratio = mean_t / mean_c

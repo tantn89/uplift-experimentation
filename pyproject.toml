@@ -22,25 +22,23 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Information Analysis",
   "Typing :: Typed",
 ]
+# Core: load and score an exported model. The analysis stack is the `analysis` extra, so the
+# serving image (core + `serve`) leaves it out. LightGBM itself still requires scipy.
 dependencies = [
   "numpy>=1.26",
   "pandas>=2.2",
-  "pyarrow>=16",
-  "scipy>=1.13",
-  "scikit-learn>=1.5",
   "lightgbm>=4.5",
-  "statsmodels>=0.14.2",
   "platformdirs>=4.2",
 ]
 
 [project.optional-dependencies]
-mlflow = ["mlflow>=3.0,<4"]
+analysis = ["pyarrow>=16", "scipy>=1.13", "scikit-learn>=1.5", "statsmodels>=0.14.2"]
+report = ["uplift-lab[analysis]", "matplotlib>=3.8"]
+mlflow = ["uplift-lab[analysis]", "mlflow>=3.0,<4"]
 serve = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2.8"]
-report = ["matplotlib>=3.8"]
 dev = [
-  "uplift-lab[serve]",
+  "uplift-lab[serve,report]",
   "httpx2>=2.9",  # Starlette's TestClient transport (replaces httpx there)
-  "matplotlib>=3.8",
   "mypy>=1.11",
   "pandas-stubs>=2.2",
   "pytest>=8.3",

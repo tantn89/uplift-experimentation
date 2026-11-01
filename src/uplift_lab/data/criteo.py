@@ -8,6 +8,9 @@ Licence: CC BY-NC-SA 4.0 (Criteo AI Lab). Neither the raw file nor any subsample
 it is committed here: a subsample is an adaptation, and redistributing it would carry the same
 non-commercial, share-alike terms. Each user builds it locally from the verified source.
 
+PyArrow (the ``analysis`` extra) is imported only when a subsample is built or read, so the
+serving image can import ``FEATURES`` from here without it.
+
 The subsample is built in two streaming passes so memory stays small: the first reads only
 the four binary label columns to choose rows, the second streams the CSV and keeps those rows.
 """
@@ -18,9 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.csv as pacsv
-import pyarrow.parquet as pq
 
 from uplift_lab.data.cache import RemoteFile, cache_dir, fetch
 from uplift_lab.data.sampling import stratified_indices
@@ -41,13 +41,11 @@ LABELS = ("treatment", "exposure", "visit", "conversion")
 DEFAULT_SUBSAMPLE_ROWS = 1_000_000
 DEFAULT_SEED = 20261101
 
-_COLUMN_TYPES: dict[str, pa.DataType] = {
-    **{name: pa.float64() for name in FEATURES},
-    **{name: pa.int8() for name in LABELS},
-}
-
 
 def _read_labels(source: Path) -> pd.DataFrame:
+    import pyarrow as pa
+    import pyarrow.csv as pacsv
+
     options = pacsv.ConvertOptions(
         include_columns=list(LABELS), column_types={name: pa.int8() for name in LABELS}
     )
@@ -72,12 +70,20 @@ def build_subsample(
     keeps the population's treatment ratio and its rare conversion rate per arm. The same
     source bytes, n_rows and seed always yield the same rows in the same (source) order.
     """
+    import pyarrow as pa
+    import pyarrow.csv as pacsv
+    import pyarrow.parquet as pq
+
     labels = _read_labels(source)
     if expected_rows is not None and len(labels) != expected_rows:
         raise ValueError(f"expected {expected_rows} rows, found {len(labels)}")
     keep = stratified_indices(labels, list(LABELS), n_rows=n_rows, seed=seed)
 
-    options = pacsv.ConvertOptions(include_columns=[*FEATURES, *LABELS], column_types=_COLUMN_TYPES)
+    column_types = {
+        **{name: pa.float64() for name in FEATURES},
+        **{name: pa.int8() for name in LABELS},
+    }
+    options = pacsv.ConvertOptions(include_columns=[*FEATURES, *LABELS], column_types=column_types)
     batches: list[pa.RecordBatch] = []
     offset = 0
     with pacsv.open_csv(source, convert_options=options) as reader:
@@ -111,6 +117,8 @@ def load_criteo_subsample(
     cache: Path | str | None = None,
 ) -> pd.DataFrame:
     """Load the seeded subsample, building it from the verified raw file on first use."""
+    import pyarrow.parquet as pq
+
     dest = subsample_path(n_rows, seed, cache)
     if not dest.exists():
         source = fetch(CRITEO, cache)

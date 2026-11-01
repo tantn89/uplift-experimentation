@@ -38,7 +38,7 @@ A bad model directory fails startup, not the first request.
 ## Run locally
 
 ```bash
-python -m pip install -e ".[serve]"
+python -m pip install -e ".[serve,report]"   # report: the analysis stack for training
 uplift-criteo-report                      # exports reports/criteo-uplift/model
 UPLIFT_LAB_MODEL_DIR=reports/criteo-uplift/model \
   uvicorn uplift_lab.serving.app:create_app --factory --port 8000
@@ -69,6 +69,32 @@ The `Dockerfile` has two stages:
 2. The runtime stage installs `uplift_lab-*.whl[serve]` on `python:3.12-slim`, adds
    `libgomp1` (LightGBM needs the system OpenMP runtime) and runs as the non-root user
    `app` (uid 10001).
+
+**What the image installs.** The package's core dependencies are only what loading and scoring
+an exported model needs: numpy, pandas, LightGBM and platformdirs. The `serve` extra adds
+FastAPI, uvicorn and pydantic. The analysis stack (pyarrow, scikit-learn, statsmodels; the
+`analysis` extra) and matplotlib (`report`) are not installed. The serving import path never
+imports them: the `uplift_lab.uplift` and `uplift_lab.experiments` packages re-export lazily,
+and pyarrow and `scipy.stats` are imported inside the functions that use them. scipy itself
+stays, because LightGBM requires it. `tests/test_serving_imports.py` serves `/health`, `/score`
+and `/decide` with those modules blocked, so a new top-level import fails the tests.
+
+Measured on Docker Desktop (Windows 11, WSL 2), `--cpus 1 --memory 512m`, same baked model:
+
+| | Before (all dependencies) | Now (core + `serve`) |
+|---|---|---|
+| Image size, uncompressed / compressed | 1.01 GB / 233 MB | **621 MB / 143 MB** |
+| Dependency layer | 643 MB | 343 MB |
+| Cold start: `docker run` to first 200 on `/health` (median of 5) | 2.12 s | **1.22 s** |
+| `import uplift_lab.serving.app` inside the container | 1.53 s | 0.79 s |
+| Memory after startup / after the benchmark | 155 / 160 MiB | **83 / 84 MiB** |
+| In-container latency p50/p95, score batch 1 | 1.18 / 1.39 ms | 1.17 / 1.41 ms |
+| In-container latency p50/p95, score batch 100 | 2.29 / 2.91 ms | 2.16 / 2.55 ms |
+
+The cold-start medians were taken back to back with warm host caches. An earlier series of 5
+starts of the old image, before its layers were in the page cache, had a median of 4.8 s, so a
+cold host can roughly double these numbers. Scoring latency does not change: the removed packages were never on the
+request path.
 
 `.dockerignore` is an allow-list: `pyproject.toml`, `README.md`, `LICENSE`, `src/` and the
 exported model only. Data, `mlruns/` and other reports never enter the build context.
@@ -142,8 +168,8 @@ Settings and why:
 - **`--max-instances=1`**: a hard cap on spend and on abuse. Excess load queues and then gets
   429s instead of scaling out.
 - **`--cpu=1 --memory=512Mi`**: scoring is single-threaded LightGBM (`OMP_NUM_THREADS=1`).
-  The container used 170 MiB after a 1,600-request benchmark (`docker stats`), so 512 MiB
-  leaves headroom. Raise it to 1 GiB if a larger model is baked in.
+  The container used 84 MiB after a 1,600-request benchmark (`docker stats`), so 512 MiB
+  leaves ample headroom. Raise it to 1 GiB if a larger model is baked in.
 - **`--concurrency=8`**: requests are CPU-bound and run on the uvicorn thread pool. A batch of
   100 takes a few milliseconds, so 8 in flight keeps one vCPU busy without letting tail
   latency grow unbounded. The Cloud Run default of 80 would only queue inside the process.
@@ -191,7 +217,7 @@ requests at the time of writing) covers a demo: at about 5 ms per request, 2 mil
 use about 10,000 vCPU-s. The worst case under `--max-instances=1` is one instance busy all
 month: about 2.6 million vCPU-s and 1.3 million GiB-s. That is tens of US dollars at list
 prices. Check the current per-region prices; `asia-southeast1` is not a tier-1 region. Artifact
-Registry storage for one image of about 500 MB is a few cents a month (0.5 GB free).
+Registry storage for the image (143 MB compressed) fits in the 0.5 GB free tier.
 
 ### Roll back and remove
 

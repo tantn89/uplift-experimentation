@@ -23,8 +23,12 @@ Modeling*, AdKDD 2018. Use is non-commercial; this repository ships code only.
 
 ## Reports
 
-Each report writes JSON metrics and PNG figures into `reports/` (git-ignored). Figures need the
-`report` extra (`python -m pip install -e ".[report]"`).
+Each report writes JSON metrics and PNG figures into `reports/` (git-ignored). Install the
+`report` extra for them (`python -m pip install -e ".[report]"`). The core package only loads
+and scores exported models (numpy, pandas, LightGBM). Extras: `analysis` adds pyarrow, scipy,
+scikit-learn and statsmodels for the reports and training; `report` is `analysis` plus
+matplotlib; `mlflow` is `analysis` plus MLflow; `serve` is the API; `dev` is everything for
+tests.
 
 ```bash
 uplift-hillstrom-report      # Welch effects, CUPED, SRM and power on Hillstrom -> reports/hillstrom
@@ -93,7 +97,10 @@ uplift-serve-benchmark --url http://127.0.0.1:8000     # p50/p95 for /score and 
 docker build -t uplift-serve . && docker run --rm -p 8080:8080 uplift-serve
 ```
 
-The image bakes the exported model directory in, runs as a non-root user and has no MLflow.
+The image bakes the exported model directory in, runs as a non-root user and installs only the
+core dependencies plus `serve` (no MLflow, pyarrow, scikit-learn or statsmodels): 621 MB
+uncompressed, about 1.2 s from `docker run` to a healthy `/health`, and 1.2 ms p50 for one row
+inside the container.
 See [docs/deployment-guide.md](docs/deployment-guide.md) for configuration, the Docker design
 and the Cloud Run commands (not deployed yet).
 
