@@ -50,6 +50,7 @@ dev = [
 [project.scripts]
 uplift-hillstrom-report = "uplift_lab.reports.hillstrom:main"
 uplift-sequential-report = "uplift_lab.reports.sequential:main"
+uplift-criteo-report = "uplift_lab.reports.criteo_uplift:main"
 
 [project.urls]
 Homepage = "https://github.com/tantn89/uplift-experimentation"
