@@ -1,8 +1,9 @@
 """Peeking simulation report: ``python -m uplift_lab.reports.sequential [--large]``.
 
 Simulates A/A and A/B experiments inspected at every look and scores a naive t-test against
-mSPRT. All numbers come from a seeded simulation; the default run takes well under a second and
-``--large`` (20,000 runs with 100 looks each) about two seconds.
+mSPRT, and the price of peeking: the cap mSPRT needs to match the fixed test's power. All numbers
+come from a seeded simulation; the default run takes about a second and ``--large`` (20,000 runs
+with 100 looks each) a few seconds.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from uplift_lab.experiments.peeking_price import price_of_peeking
 from uplift_lab.experiments.peeking_simulation import PeekingConfig, simulate_peeking, summarise
 from uplift_lab.reports.output import MISSING_MATPLOTLIB, write_json
 
@@ -37,6 +39,7 @@ def write_sequential_report(
         "design_effect": effect,
         "aa": summarise(null),
         "ab": summarise(alternative),
+        "price_of_peeking": price_of_peeking(config),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "sequential.json", payload)
@@ -84,6 +87,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{scenario}: rejection rate {rates}")
     median_stop = payload["ab"]["msprt"]["median_stop_n_if_rejected"]
     print(f"mSPRT median stop (A/B, rejecting runs): {median_stop:.0f} units per arm")
+    price = payload["price_of_peeking"]
+    if price["msprt_cap_per_arm"] is None:
+        print(f"mSPRT does not reach {price['target_power']:.0%} power within the simulated cap")
+    else:
+        print(
+            f"price of peeking: mSPRT reaches {price['target_power']:.0%} power with a cap of "
+            f"{price['msprt_cap_per_arm']:,} per arm ({price['cap_ratio_vs_fixed']:.2f}x the fixed "
+            f"horizon); mean n {price['msprt_mean_n_per_arm_under_cap']:,.0f} "
+            f"({price['mean_n_ratio_vs_fixed']:.2f}x), type-I "
+            f"{price['msprt_type_one_error_under_cap']:.4f}"
+        )
     print(f"wrote {args.output_dir}")
     return 0
 

@@ -1,7 +1,8 @@
 """Hillstrom A/B report: ``python -m uplift_lab.reports.hillstrom --output-dir reports/hillstrom``.
 
 Downloads the dataset once (checksummed), runs the analysis and writes ``hillstrom.json`` plus
-two PNG figures. The analysis is deterministic; nothing in it is random.
+two PNG figures. The analysis is deterministic; the strong-covariate CUPED contrast next to it is a
+seeded simulation.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import Any
 import pandas as pd
 
 from uplift_lab.data.hillstrom import load_hillstrom
+from uplift_lab.experiments.cuped_simulation import CupedSimConfig, simulate_cuped_contrast
 from uplift_lab.reports.hillstrom_analysis import analyse_hillstrom
 from uplift_lab.reports.output import MISSING_MATPLOTLIB, write_json
 
@@ -25,9 +27,15 @@ def write_hillstrom_report(
     alpha: float = 0.05,
     relative_mde: float = 0.10,
     figures: bool = True,
+    cuped_contrast: CupedSimConfig | None = None,
 ) -> dict[str, Any]:
-    """Analyse ``frame`` and write the JSON and figures; returns the analysis payload."""
+    """Analyse ``frame`` and write the JSON and figures; returns the analysis payload.
+
+    The payload also holds ``cuped_simulated_contrast``: the seeded strong-covariate simulation
+    that shows what CUPED does when the pre-period metric does predict the outcome.
+    """
     analysis = analyse_hillstrom(frame, alpha=alpha, relative_mde=relative_mde)
+    analysis["cuped_simulated_contrast"] = simulate_cuped_contrast(cuped_contrast)
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "hillstrom.json", analysis)
     if figures:
@@ -53,6 +61,13 @@ def _summary_lines(analysis: dict[str, Any]) -> list[str]:
                 f"[{adjusted['ci_low']:+.5f}, {adjusted['ci_high']:+.5f}]  "
                 f"var -{cuped['variance_reduction']:.2%}"
             )
+    for row in analysis["cuped_simulated_contrast"]["by_rho"]:
+        lines.append(
+            f"simulated CUPED rho {row['rho']:.1f} (R^2 {row['r_squared']:.2f}): variance "
+            f"ratio {row['empirical_variance_ratio']:.3f} "
+            f"(theory {row['theoretical_variance_ratio']:.2f}), "
+            f"coverage {row['cuped_ci_coverage']:.3f}"
+        )
     return lines
 
 

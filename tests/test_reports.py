@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from uplift_lab.data.hillstrom import ARMS
+from uplift_lab.experiments.cuped_simulation import CupedSimConfig
 from uplift_lab.experiments.peeking_simulation import PeekingConfig
 from uplift_lab.reports import hillstrom, sequential
 from uplift_lab.reports.hillstrom import write_hillstrom_report
@@ -44,7 +45,8 @@ def _synthetic_hillstrom(n: int = 6_000, seed: int = 7) -> pd.DataFrame:
 
 
 def test_hillstrom_report_writes_metrics_and_figures(tmp_path: Path) -> None:
-    analysis = write_hillstrom_report(_synthetic_hillstrom(), tmp_path)
+    contrast = CupedSimConfig(n_per_arm=200, n_reps=50, rhos=(0.0, 0.9))
+    analysis = write_hillstrom_report(_synthetic_hillstrom(), tmp_path, cuped_contrast=contrast)
     saved = json.loads((tmp_path / "hillstrom.json").read_text(encoding="utf-8"))
     assert saved["srm"]["mismatch"] is False
     assert set(saved["effects"]) == set(TREATED_ARMS)
@@ -57,6 +59,9 @@ def test_hillstrom_report_writes_metrics_and_figures(tmp_path: Path) -> None:
     visit = analysis["effects"]["Mens E-Mail"]["visit"]
     assert visit["cuped"]["pre_period"]["variance_reduction"] > 0.05
     assert visit["raw"]["ci_low"] > 0
+    simulated = saved["cuped_simulated_contrast"]["by_rho"]
+    assert [row["rho"] for row in simulated] == [0.0, 0.9]
+    assert simulated[1]["mean_reported_variance_reduction"] > 0.7
     assert (tmp_path / "hillstrom-effects.png").stat().st_size > 10_000
     assert (tmp_path / "hillstrom-power.png").stat().st_size > 10_000
 
@@ -80,6 +85,7 @@ def test_sequential_report_writes_metrics_and_figures(tmp_path: Path) -> None:
     saved = json.loads((tmp_path / "sequential.json").read_text(encoding="utf-8"))
     assert saved["tau"] == pytest.approx(config.design_effect())
     assert saved["aa"]["msprt"]["rejection_rate"] == payload["aa"]["msprt"]["rejection_rate"]
+    assert saved["price_of_peeking"]["fixed_horizon_per_arm"] == config.horizon_per_arm
     assert (tmp_path / "sequential-peeking.png").is_file()
     assert (tmp_path / "sequential-stopping.png").is_file()
 
@@ -92,7 +98,9 @@ def test_sequential_cli_applies_overrides(
     saved = json.loads((tmp_path / "sequential.json").read_text(encoding="utf-8"))
     assert saved["config"]["n_sims"] == 300
     assert saved["config"]["looks"] == 4
-    assert "rejection rate" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "rejection rate" in out
+    assert "power" in out
     with pytest.raises(SystemExit):
         sequential.main(["--output-dir", str(tmp_path), "--n-sims", "0"])
 
