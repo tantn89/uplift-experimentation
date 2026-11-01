@@ -1,0 +1,100 @@
+{
+  "format": "uplift-lab.metric-gate",
+  "schema_version": 1,
+  "fingerprint": {
+    "generator": "uplift_lab.data.synthetic.synthetic_uplift_frame",
+    "n_rows": 100000,
+    "seed": 20261101,
+    "frame_sha256_rounded_9dp": "beb908dcc6581941508e3df0f48500e9f8353fa0bfedfd4e2d1721274f61e9e3",
+    "outcome": "visit",
+    "test_size": 0.3,
+    "n_bootstrap": 200,
+    "alpha": 0.05,
+    "budget": 0.1
+  },
+  "model": {
+    "features": [
+      "f0",
+      "f1",
+      "f2",
+      "f3",
+      "f4",
+      "f5",
+      "f6",
+      "f7",
+      "f8",
+      "f9",
+      "f10",
+      "f11"
+    ],
+    "params": {
+      "n_estimators": 200,
+      "learning_rate": 0.05,
+      "num_leaves": 31,
+      "min_child_samples": 100,
+      "seed": 20261101
+    }
+  },
+  "metrics": {
+    "s_learner": {
+      "qini_coefficient": {
+        "estimate": 0.014549851698828317,
+        "ci_low": 0.012180816726137201,
+        "ci_high": 0.016644196147054823
+      },
+      "policy_per_1000_contacts@0.1": {
+        "estimate": 167.49542844310417,
+        "ci_low": 134.12925502307743,
+        "ci_high": 195.83761191941056
+      }
+    },
+    "t_learner": {
+      "qini_coefficient": {
+        "estimate": 0.012649633621824363,
+        "ci_low": 0.010681835023167364,
+        "ci_high": 0.0147013278282901
+      },
+      "policy_per_1000_contacts@0.1": {
+        "estimate": 158.0223917128017,
+        "ci_low": 126.35312243219735,
+        "ci_high": 188.64505373701445
+      }
+    },
+    "x_learner": {
+      "qini_coefficient": {
+        "estimate": 0.013421292004396089,
+        "ci_low": 0.011645406308543589,
+        "ci_high": 0.01556666872025967
+      },
+      "policy_per_1000_contacts@0.1": {
+        "estimate": 169.811320754717,
+        "ci_low": 137.44678039870033,
+        "ci_high": 200.34744943402214
+      }
+    },
+    "transformed_outcome": {
+      "qini_coefficient": {
+        "estimate": 0.01152990228320052,
+        "ci_low": 0.009595955544858968,
+        "ci_high": 0.013291396383738932
+      },
+      "policy_per_1000_contacts@0.1": {
+        "estimate": 157.63653631869818,
+        "ci_low": 123.64314265631315,
+        "ci_high": 181.64946473793665
+      }
+    },
+    "random": {
+      "qini_coefficient": {
+        "estimate": 2.8673418768082333e-05,
+        "ci_low": -0.001980239127686388,
+        "ci_high": 0.002626492426291573
+      },
+      "policy_per_1000_contacts@0.1": {
+        "estimate": 40.29660141390396,
+        "ci_low": 12.468484333963259,
+        "ci_high": 73.81663235204454
+      }
+    }
+  }
+}
