@@ -18,7 +18,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from uplift_lab.gate.metric_gate import QINI, BaselineMismatch, GateResult, compare, gate_metrics
+from uplift_lab.gate.metric_gate import (
+    MIN_RELATIVE_CHANGE,
+    QINI,
+    BaselineMismatch,
+    GateResult,
+    compare,
+    gate_metrics,
+)
 from uplift_lab.reports.output import write_json
 
 DEFAULT_BASELINE = Path("evals/metric-gate-baseline.json")
@@ -43,11 +50,13 @@ def render_markdown(result: GateResult) -> str:
     lines = [
         f"## uplift metric gate: {result.verdict}",
         "",
-        "Fails when a head estimate drops below the baseline's lower 95% bootstrap bound, or "
-        "a learner's Qini interval no longer excludes 0.",
+        "Fails when the head-minus-baseline difference, bootstrapped on the same draws, lies "
+        f"below 0 and drops more than {MIN_RELATIVE_CHANGE:.0%} of the baseline, or when a "
+        "learner's Qini interval no longer excludes 0.",
         "",
-        "| Learner | Metric | Baseline [95% CI] | Head | Status |",
-        "|---|---|---|---|---|",
+        "| Learner | Metric | Baseline [95% CI] | Head | Head - baseline [paired 95% CI] "
+        "| Status |",
+        "|---|---|---|---|---|---|",
     ]
     for f in result.findings:
         digits = 5 if f.metric == QINI else 1
@@ -58,7 +67,13 @@ def render_markdown(result: GateResult) -> str:
             else "-"
         )
         head = f"{f.head:.{digits}f}" if f.head is not None else "-"
-        lines.append(f"| {f.learner} | {f.metric} | {base} | {head} | {f.status} |")
+        change = (
+            f"{f.change.estimate:+.{digits}f} "
+            f"[{f.change.ci_low:+.{digits}f}, {f.change.ci_high:+.{digits}f}]"
+            if f.change is not None
+            else "-"
+        )
+        lines.append(f"| {f.learner} | {f.metric} | {base} | {head} | {change} | {f.status} |")
     return "\n".join(lines) + "\n"
 
 

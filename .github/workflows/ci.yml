@@ -71,18 +71,22 @@ jobs:
 
   # Uplift quality gate on a seeded synthetic RCT (no download): every learner's Qini and its
   # 10%-budget policy value against the committed evals/metric-gate-baseline.json. It fails when
-  # an estimate drops below the baseline's lower 95% bootstrap bound or a Qini interval stops
-  # excluding 0. Refresh the baseline in the same pull request: uplift-metric-gate --update-baseline
+  # the head-minus-baseline difference on the same bootstrap draws lies below 0 (and drops more
+  # than 2% of the baseline), or a Qini interval stops excluding 0. The baseline fingerprints the
+  # library versions, so the job installs the pinned set it was built with (Python 3.12).
+  # Refresh the baseline in the same pull request: uplift-metric-gate --update-baseline
   metric-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
-          cache-dependency-path: pyproject.toml
-      - run: python -m pip install -e ".[analysis]"
+          cache-dependency-path: |
+            pyproject.toml
+            evals/metric-gate-constraints.txt
+      - run: python -m pip install -e ".[analysis]" -c evals/metric-gate-constraints.txt
       - run: uplift-metric-gate
       - if: always()
         run: |

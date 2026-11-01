@@ -1,0 +1,12 @@
+# The library versions that built evals/metric-gate-baseline.json (Python 3.12). The gate's
+# fingerprint records lightgbm, numpy, pandas and scikit-learn, and refuses to compare across
+# versions, so the CI metric-gate job installs with: pip install -e ".[analysis]" -c <this file>.
+# Bump these together with uplift-metric-gate --update-baseline.
+lightgbm==4.7.0
+numpy==2.5.4
+pandas==3.1.0
+scikit-learn==1.9.1
+scipy==1.18.1
+statsmodels==0.15.0
+pyarrow==25.0.1
+platformdirs==4.14.2

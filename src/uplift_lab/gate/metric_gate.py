@@ -1,45 +1,61 @@
-"""Uplift metric regression gate: seeded synthetic data, committed baseline, bootstrap-CI rule.
+"""Uplift metric regression gate: seeded synthetic data, committed baseline, paired bootstrap rule.
 
 ``gate_metrics`` trains every learner on a fixed seeded synthetic RCT
 (``uplift_lab.data.synthetic``, no download) and records, per learner, the Qini coefficient and
-the policy value at the 10% budget (incremental visits per 1,000 contacts), each with its
-percentile bootstrap interval. ``compare`` checks a fresh run (head) against the committed
-baseline:
+the policy value at the 10% budget (incremental visits per 1,000 contacts). Each comes with its
+percentile bootstrap interval and the value on every bootstrap draw. The draws are seeded and the
+test set is fixed by the fingerprint, so draw ``b`` of the baseline and draw ``b`` of a later run
+resample exactly the same rows. ``compare`` uses that pairing:
 
-- **regression**: the head point estimate is below the baseline's lower 95% bound. The data,
-  split and bootstrap draws are fixed, so a code change is the only thing that moves the
-  estimate; the rule fails it only when the drop is larger than the test set's own sampling
-  noise (a drop the baseline's bootstrap distribution puts below its 2.5% quantile);
+- **regression**: the head-minus-baseline difference, bootstrapped on the same draws, has its
+  95% interval entirely below 0, *and* the point drop exceeds ``MIN_RELATIVE_CHANGE`` of the
+  baseline estimate. The paired interval measures the drop against the test set's sampling
+  noise far more tightly than the baseline's own interval would. The floor keeps a change too
+  small to matter (for example floating-point differences between platforms that move one
+  split) from failing the build;
 - **no longer beats random**: the head Qini interval no longer excludes 0 from above;
-- **improvement**: the head estimate is above the baseline's upper bound (passes; refresh the
-  baseline so later changes are judged against it).
+- **improvement**: the same two conditions in the other direction (passes; refresh the baseline
+  so later changes are judged against it).
 
-The data and evaluation settings form the baseline's fingerprint. If they differ, the two runs
-are not comparable and ``BaselineMismatch`` is raised instead of a verdict. Model settings
-(features, LightGBM parameters) are recorded but not part of the fingerprint: they are what the
-gate judges.
+The fingerprint holds what must match for the pairing and the comparison to mean anything: the
+data generator and seed, the frame hash, the evaluation settings and the versions of the
+libraries that produce the numbers (LightGBM, numpy, pandas, scikit-learn for the split). If any
+differs, ``BaselineMismatch`` is raised instead of a verdict. CI installs the pinned versions from
+``evals/metric-gate-constraints.txt``. Model settings (features, LightGBM parameters) are recorded
+but not fingerprinted: they are what the gate judges. With the fingerprint fixed, the estimates
+move when the model code or settings change; an identical rerun reproduces them exactly.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from importlib.metadata import version
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from uplift_lab.data.synthetic import FEATURE_NAMES, synthetic_uplift_frame
+from uplift_lab.experiments.estimators import FloatArray
+from uplift_lab.uplift.bootstrap import Interval, bootstrap_draws, percentile_interval
 from uplift_lab.uplift.evaluation import RANDOM_SCORER
 from uplift_lab.uplift.learners import LEARNERS, LgbmParams
-from uplift_lab.uplift.pipeline import UpliftConfig, run_uplift
+from uplift_lab.uplift.metrics import Ranking, SortedSample, qini_coefficient
+from uplift_lab.uplift.pipeline import UpliftConfig, UpliftRun, run_uplift
+from uplift_lab.uplift.policy import policy_value
 from uplift_lab.uplift.provenance import frame_sha256
 
 FORMAT = "uplift-lab.metric-gate"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GATE_BUDGET = 0.1
 QINI = "qini_coefficient"
 POLICY = f"policy_per_1000_contacts@{GATE_BUDGET:g}"
 METRICS = (QINI, POLICY)
+#: Libraries whose versions change the numbers; pinned for CI in evals/metric-gate-constraints.txt.
+VERSIONED_LIBRARIES = ("lightgbm", "numpy", "pandas", "scikit-learn")
+#: A paired change smaller than this share of the baseline estimate is never a verdict.
+MIN_RELATIVE_CHANGE = 0.02
 
 
 @dataclass(frozen=True)
@@ -79,11 +95,16 @@ class GateConfig:
             "n_bootstrap": self.n_bootstrap,
             "alpha": self.alpha,
             "budget": GATE_BUDGET,
+            "versions": library_versions(),
         }
 
 
+def library_versions() -> dict[str, str]:
+    return {name: version(name) for name in VERSIONED_LIBRARIES}
+
+
 class BaselineMismatch(ValueError):
-    """The baseline was built on other data or evaluation settings; refresh it."""
+    """The baseline was built on other data, settings or library versions; refresh it."""
 
 
 @dataclass(frozen=True)
@@ -93,6 +114,7 @@ class Finding:
     status: str  # ok | regression | improvement | not_beating_random | missing
     head: float | None
     baseline: Mapping[str, float] | None
+    change: Interval | None = None  # head minus baseline on the same bootstrap draws
 
     @property
     def failed(self) -> bool:
@@ -114,6 +136,36 @@ class GateResult:
         return "IMPROVEMENT" if any(f.status == "improvement" for f in self.findings) else "PASS"
 
 
+def _gate_draws(run: UpliftRun, n_bootstrap: int, seed: int, alpha: float) -> dict[str, Any]:
+    """Qini and 10%-budget policy value per scoring, with intervals and every draw's value.
+
+    Uses the same seed and weights as the run's own evaluation, so the estimates and intervals
+    equal the ones in ``run.evaluation``.
+    """
+    samples = {
+        name: SortedSample(Ranking(scores), run.test_treatment, run.test_outcome)
+        for name, scores in run.scores.items()
+        if name in LEARNERS or name == RANDOM_SCORER
+    }
+
+    def statistic(weights: FloatArray | None) -> dict[str, float]:
+        values = {}
+        for name, sample in samples.items():
+            g = sample.gains(weights)
+            values[f"{name}|{QINI}"] = qini_coefficient(g)
+            values[f"{name}|{POLICY}"] = policy_value(g, GATE_BUDGET).model_per_1000_contacts
+        return values
+
+    result = bootstrap_draws(statistic, run.n_test, n_boot=n_bootstrap, seed=seed)
+    metrics: dict[str, Any] = {}
+    for key, draws in result.draws.items():
+        name, metric = key.split("|")
+        entry: dict[str, Any] = result.interval(key, alpha).to_dict()
+        entry["draws"] = draws.tolist()
+        metrics.setdefault(name, {})[metric] = entry
+    return metrics
+
+
 def gate_metrics(config: GateConfig | None = None) -> dict[str, Any]:
     """Train and evaluate every learner on the seeded synthetic RCT; the gate payload."""
     config = config or GateConfig()
@@ -131,21 +183,12 @@ def gate_metrics(config: GateConfig | None = None) -> dict[str, Any]:
         ),
         features=config.features,
     )
-    models = run.evaluation["models"]
-    metrics = {
-        name: {
-            QINI: models[name][QINI],
-            POLICY: models[name]["policy"][f"{GATE_BUDGET:g}"]["model_per_1000_contacts"],
-        }
-        for name in (*LEARNERS, RANDOM_SCORER)
-        if name in models
-    }
     return {
         "format": FORMAT,
         "schema_version": SCHEMA_VERSION,
         "fingerprint": config.fingerprint(frame),
         "model": {"features": list(config.features), "params": config.params.to_dict()},
-        "metrics": metrics,
+        "metrics": _gate_draws(run, config.n_bootstrap, config.seed, config.alpha),
     }
 
 
@@ -159,22 +202,37 @@ def _check_comparable(baseline: Mapping[str, Any], head: Mapping[str, Any]) -> N
             if baseline.get("fingerprint", {}).get(key) != head["fingerprint"].get(key)
         )
         raise BaselineMismatch(
-            f"data or evaluation settings differ from the baseline ({', '.join(diff)}); "
-            "refresh it with uplift-metric-gate --update-baseline"
+            f"data, evaluation settings or library versions differ from the baseline "
+            f"({', '.join(diff)}); install evals/metric-gate-constraints.txt, or refresh the "
+            "baseline with uplift-metric-gate --update-baseline"
         )
 
 
-def _judge(metric: str, base: Mapping[str, float], head: Mapping[str, float]) -> str:
+def paired_change(base: Mapping[str, Any], head: Mapping[str, Any], alpha: float) -> Interval:
+    """Head minus baseline, with a percentile interval over the paired bootstrap draws."""
+    base_draws = np.asarray(base["draws"], dtype=np.float64)
+    head_draws = np.asarray(head["draws"], dtype=np.float64)
+    if base_draws.shape != head_draws.shape or base_draws.ndim != 1:
+        raise BaselineMismatch("baseline and head hold different numbers of bootstrap draws")
+    estimate = float(head["estimate"]) - float(base["estimate"])
+    return percentile_interval(estimate, head_draws - base_draws, alpha)
+
+
+def _judge(metric: str, base: Mapping[str, Any], head: Mapping[str, Any], change: Interval) -> str:
     if metric == QINI and not head["ci_low"] > 0.0:
         return "not_beating_random"
-    if head["estimate"] < base["ci_low"]:
+    floor = MIN_RELATIVE_CHANGE * abs(float(base["estimate"]))
+    if change.ci_high < 0.0 and change.estimate < -floor:
         return "regression"
-    return "improvement" if head["estimate"] > base["ci_high"] else "ok"
+    if change.ci_low > 0.0 and change.estimate > floor:
+        return "improvement"
+    return "ok"
 
 
 def compare(baseline: Mapping[str, Any], head: Mapping[str, Any]) -> GateResult:
     """Judge every baseline learner and metric (the random scorer is context, not gated)."""
     _check_comparable(baseline, head)
+    alpha = float(baseline["fingerprint"]["alpha"])
     findings = []
     for learner, base_metrics in baseline["metrics"].items():
         if learner == RANDOM_SCORER:
@@ -185,6 +243,7 @@ def compare(baseline: Mapping[str, Any], head: Mapping[str, Any]) -> GateResult:
             if current is None:
                 findings.append(Finding(learner, metric, "missing", None, base))
                 continue
-            status = _judge(metric, base, current)
-            findings.append(Finding(learner, metric, status, current["estimate"], base))
+            change = paired_change(base, current, alpha)
+            status = _judge(metric, base, current, change)
+            findings.append(Finding(learner, metric, status, current["estimate"], base, change))
     return GateResult(tuple(findings))
