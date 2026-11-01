@@ -58,6 +58,26 @@ def test_learner_is_deterministic_for_a_seed(kind: str) -> None:
     np.testing.assert_array_equal(fit_predict(params), fit_predict(params))
 
 
+# Frozen predictions: five probe rows after a small seeded fit (LightGBM 4.7.0, 2026-11-01).
+# A change to how a learner fits or combines its boosters moves these by far more than the
+# tolerance; a deliberate change (or a LightGBM upgrade that changes training) re-freezes them.
+FROZEN = {
+    "s_learner": [0.003119865428, 0.1184514654, 0.1033433445, 0.04167654795, 0.1280240936],
+    "t_learner": [0.04071034715, 0.1645718686, 0.1128580823, 0.1062925534, 0.162904309],
+    "x_learner": [-0.01170044962, 0.1277417542, 0.09418085984, 0.09761020016, 0.1079726852],
+    "transformed_outcome": [-0.1698258481, 0.2299634105, 0.08537835391, 0.1460876693, 0.12360744],
+}
+
+
+@pytest.mark.parametrize("kind", sorted(LEARNERS))
+def test_learner_predictions_match_frozen_values(kind: str) -> None:
+    frame = synthetic_uplift_frame(3_000, seed=11)
+    probe = synthetic_uplift_frame(5, seed=12)
+    params = LgbmParams(n_estimators=25, min_child_samples=50)
+    learner = make_learner(kind, params).fit(frame[FEATURES], frame["treatment"], frame["visit"])
+    np.testing.assert_allclose(learner.predict(probe), FROZEN[kind], rtol=1e-6, atol=1e-8)
+
+
 def test_x_learner_blends_with_training_propensity(fitted: dict[str, UpliftLearner]) -> None:
     assert fitted["x_learner"].propensity_ == pytest.approx(0.85, abs=0.01)
     assert set(fitted["x_learner"].boosters_) == {"effect_control", "effect_treated"}
