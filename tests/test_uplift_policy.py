@@ -18,12 +18,12 @@ Y = np.array([1, 0, 1, 0, 0, 0, 0, 1])
 
 def test_policy_value_hand_computed() -> None:
     value = policy_value(gains(Ranking(SCORES), T, Y), 0.5)
-    # e = 0.5; the top four hold two treated visitors and no control visitor:
-    # sum(z) = 2 / 0.5 = 4 over N = 8 users -> 0.5 incremental visits per user.
+    # The top four: treated 2/2 visit, control 0/2 -> +1 visit per contact, 0.5 per user.
+    # Horvitz-Thompson with e = 0.5: sum(z) = 2 / 0.5 = 4 over 4 contacts -> also 1.
     assert value.targeted_share == 0.5
-    assert value.model_per_1000_users == pytest.approx(500.0)
     assert value.model_per_1000_contacts == pytest.approx(1000.0)
-    assert value.model_difference_per_1000_contacts == pytest.approx(1000.0)
+    assert value.model_ipw_per_1000_contacts == pytest.approx(1000.0)
+    assert value.model_per_1000_users == pytest.approx(500.0)
     # ATE = 2/4 - 1/4.
     assert value.treat_all_per_1000_contacts == pytest.approx(250.0)
     assert value.random_per_1000_users == pytest.approx(125.0)
@@ -38,8 +38,17 @@ def test_treat_all_equals_difference_in_means() -> None:
     value = policy_value(g, 1.0)
     assert average_treatment_effect(g) == pytest.approx(ate, rel=1e-12)
     assert value.model_per_1000_contacts == pytest.approx(1000 * ate, rel=1e-12)
-    assert value.model_difference_per_1000_contacts == pytest.approx(1000 * ate, rel=1e-12)
+    assert value.model_ipw_per_1000_contacts == pytest.approx(1000 * ate, rel=1e-12)
     assert value.gain_over_random_per_1000_contacts == pytest.approx(0.0, abs=1e-9)
+
+
+def test_difference_estimator_is_robust_to_arm_imbalance_in_the_segment() -> None:
+    # Everyone visits, so the true effect is zero, but the top half is 3 treated : 1 control
+    # while the overall share is 0.5. Horvitz-Thompson reads (3/0.5 - 1/0.5) / 4 = +1 per contact.
+    t = np.array([1, 1, 1, 0, 1, 0, 0, 0])
+    value = policy_value(gains(Ranking(SCORES), t, np.ones(8)), 0.5)
+    assert value.model_per_1000_contacts == 0.0
+    assert value.model_ipw_per_1000_contacts == pytest.approx(1000.0)
 
 
 def test_policy_value_matches_true_effect_of_targeted_users() -> None:
@@ -48,10 +57,11 @@ def test_policy_value_matches_true_effect_of_targeted_users() -> None:
     g = gains(Ranking(tau), frame["treatment"], frame["visit"])
     value = policy_value(g, 0.2)
     top = np.sort(tau)[::-1][: int(0.2 * tau.size)]
-    # The IPW standard error here is about 0.7 per 1,000 users (3.4 per 1,000 contacts at a
-    # 20% budget); allow roughly 4.5 standard errors.
+    # Standard errors here are about 4 per 1,000 contacts (0.8 per 1,000 users at a 20%
+    # budget) for the difference estimator, a little more for Horvitz-Thompson.
     assert value.model_per_1000_users == pytest.approx(1000 * top.sum() / tau.size, abs=3.0)
     assert value.model_per_1000_contacts == pytest.approx(1000 * top.mean(), abs=15.0)
+    assert value.model_ipw_per_1000_contacts == pytest.approx(1000 * top.mean(), abs=20.0)
     assert value.gain_over_random_per_1000_contacts > 50
 
 
