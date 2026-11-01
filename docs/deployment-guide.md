@@ -122,16 +122,28 @@ for Cloud Run.
 These commands target project `filings-copilot` in `asia-southeast1`. They create billable
 resources.
 
-### Pending redeploy with the new champion
+### Live deployment (2026-11-01, current champion)
 
-The registered champion is now Unity Catalog version 4: the full-data S-learner from job run
-`369767185615309`, git SHA `4238f32`, chosen by the pre-declared champion rule (see
-[databricks-run.md](databricks-run.md)). Cloud Run will be redeployed with it, baked with
-`--build-arg MODEL_DIR=reports/databricks/369767185615309/model`. Until then the live service
-still runs the earlier model below, and the numbers in this section are historical measurements
-of that deployment.
+The service runs the registered champion, Unity Catalog version 4. That is the full-data
+S-learner from job run `369767185615309`, git SHA `4238f32`, chosen by the pre-declared champion
+rule (see [databricks-run.md](databricks-run.md)).
+- **Build:** `--build-arg MODEL_DIR=reports/databricks/369767185615309/model`, image tag
+  `uplift-serve:0.1.0-s`, revision `uplift-serve-00002-97f`.
+- **Check:** `/health` reports `s_learner`, package 0.1.0, SHA `4238f32`.
+- **Access:** an anonymous call gets 403.
 
-### Live deployment (2026-11-01, historical: previous model)
+| Case | Client p50 / p95 | Server p50 / p95 |
+|---|---|---|
+| `/score` batch 1 | 74.5 / 83.5 ms | 9.0 / 16.1 ms (`/score`, both batch sizes) |
+| `/decide` batch 1 | 73.2 / 79.5 ms | |
+| `/score` batch 100 | 90.4 / 100.9 ms | |
+| `/decide` batch 100 | 91.6 / 99.1 ms | |
+
+Client latency is from Vietnam, 200 sequential requests per case. Server latency comes from
+Cloud Run's request logs for 400 `/score` requests. The S-learner scores each row twice (treated
+and control), which makes it slightly slower than the earlier single-model deployment below.
+
+### Earlier deployment (2026-11-01, historical: previous model)
 
 The commands below were run as written, except that the build baked the model trained on the
 full Criteo data on Databricks:

@@ -19,7 +19,7 @@ Done:
   Unity Catalog (v4, S-learner champion). A rerun reproduces the earlier run's point estimates
   exactly.
 - A FastAPI service with `/score` and `/decide`, and a slim non-root image. It is live on Cloud Run
-  behind IAM, with one instance at most (redeploy with the v4 champion pending).
+  behind IAM, with one instance at most, serving the v4 S-learner champion.
 - Drift monitoring with PSI, KS and the decision rate; a CI drift gate.
 - A CI metric gate against a committed baseline, on paired bootstrap draws.
 

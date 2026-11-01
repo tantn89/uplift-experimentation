@@ -62,7 +62,7 @@ and where each claim is proven.
 | R12 | Drift is detected | Seeded no-shift is ok and covariate shift alerts (CI gate); the decision rate flags a label shift that PSI misses (a warning at 1.46x with the current champion) | `monitoring/drift.py`; `tests/test_drift.py`, `.github/workflows/ci.yml` (`drift-report`) |
 | R13 | Quality regressions fail CI | A paired head-minus-baseline interval below 0 with a drop over 2%, or a Qini interval covering 0, fails; an incomparable baseline (data, settings or library versions) exits 2 | `gate/`; `tests/test_metric_gate.py`, `.github/workflows/ci.yml` (`metric-gate`) |
 | R14 | Same code locally and on Databricks; reruns reproduce | The current run's point estimates equal the earlier Databricks run exactly; that earlier run agreed with a local full-data run to a relative 2e-14 (a one-off local comparison whose outputs are not in the repository) | `pipelines/criteo_full_training.py`; [databricks-run.md](databricks-run.md) |
-| R15 | Live, capped, authenticated endpoint | Anonymous call 403, token 200; `max-instances=1`; budget alert | [deployment-guide.md](deployment-guide.md) (live deployment section; measured with the previous model, redeploy with the v4 champion pending) |
+| R15 | Live, capped, authenticated endpoint | Anonymous call 403, token 200; `max-instances=1`; budget alert | [deployment-guide.md](deployment-guide.md) (live deployment section; serving the v4 champion) |
 
 ## Evidence
 

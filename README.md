@@ -28,7 +28,7 @@ comparison is a one-off spike: those vary between runs and releases.
 | CUPED on Hillstrom, then on a simulated strong covariate | Hillstrom visit variance **-2.6%**, because pre-period data barely predicts two-week visits. With R² = 0.49 the variance falls **49%** | `uplift-hillstrom-report` |
 | Targeting the top 10% by predicted uplift, Criteo, all 13,979,592 rows | **63.7 [60.0, 67.2]** incremental visits per 1,000 contacts with the registered S-learner champion, against 10.3 for treating everyone | [docs/databricks-run.md](docs/databricks-run.md) |
 | Drift on simulated shift, scored by the champion | Covariate tilt **alerts**; a 3x label shift **warns** (decision rate 1.46x, just under the 1.5x alert); unshifted traffic stays ok | `uplift-drift-report` |
-| Scoring on Cloud Run (IAM-authenticated, max 1 instance), measured with the earlier v2 model | Server-side p50/p95 **6.9 / 9.6 ms**; image 621 MB | [docs/deployment-guide.md](docs/deployment-guide.md) |
+| Scoring on Cloud Run (IAM-authenticated, max 1 instance), serving the v4 S-learner champion | Server-side p50/p95 **9.0 / 16.1 ms**; image 621 MB | [docs/deployment-guide.md](docs/deployment-guide.md) |
 | A model change that hurts targeting | CI fails: the metric gate compares Qini and policy value with a committed baseline on the same bootstrap draws | `uplift-metric-gate` |
 
 ---
@@ -176,18 +176,16 @@ exactly `f0`-`f11` as JSON numbers (a boolean or a numeric string is a 422, not 
 `treatment`, `exposure` and outcome fields are rejected with 422, and batches are capped at 1,000
 rows.
 
-These are measurements, taken on 2026-11-01 before the current champion existed: the Cloud Run
-rows with the earlier registered model (v2, the transformed-outcome learner), the container rows
-with an earlier export baked into the local image. The live service is being redeployed with the
-v4 S-learner champion; the numbers below stay as measured until it is re-benchmarked. The S-learner runs its one booster
-twice per row (as treated and as control), so its in-container scoring time may be somewhat
-higher.
+These are measurements taken on 2026-11-01. The Cloud Run rows come from the live service, which
+serves the v4 S-learner champion (revision `uplift-serve-00002-97f`). The container rows come from
+an earlier export baked into a local image. The S-learner runs its one booster twice per row, once
+as treated and once as control.
 
 | Measurement | Result |
 |---|---|
-| Cloud Run, `asia-southeast1`, server-side request latency (400 `/score` calls, batch 1 and 100) | p50 6.9 ms, p95 9.6 ms |
-| Same calls measured at a client in Vietnam | p50 72 ms (mostly the network round trip to Singapore) |
-| Inside the container, `/score` batch 1 / batch 100 | p50 1.17 / 2.16 ms |
+| Cloud Run, `asia-southeast1`, server-side request latency (400 `/score` calls, batch 1 and 100) | p50 9.0 ms, p95 16.1 ms |
+| Same calls measured at a client in Vietnam | p50 74 ms (mostly the network round trip to Singapore) |
+| Inside the container (earlier export), `/score` batch 1 / batch 100 | p50 1.17 / 2.16 ms |
 | Image, uncompressed / compressed | 621 MB / 143 MB (from 1.01 GB, once the analysis stack left the image) |
 | Cold start, `docker run` to a healthy `/health` (local) | 1.22 s |
 | Memory after a 1,600-request benchmark | 84 MiB |
