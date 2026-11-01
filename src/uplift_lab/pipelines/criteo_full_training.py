@@ -149,8 +149,11 @@ def log_to_mlflow(
     env: Mapping[str, str],
     mlflow_root: Path,
 ) -> dict[str, Any]:
-    """Log the registered outcome's run, register its model, add the other outcomes' metrics."""
-    from uplift_lab.uplift.tracking import TrackingConfig, flatten_metrics, log_uplift_run
+    """Log the registered outcome's run with the other outcomes' metrics, register its model.
+
+    Everything is logged in one go before the model (see ``tracking.MAX_RUN_METRICS``).
+    """
+    from uplift_lab.uplift.tracking import TrackingConfig, log_uplift_run, outcome_metrics
 
     dirty = payload["git"]["dirty"]
     tags = {"git_sha": str(payload["git"]["sha"]), "git_dirty": str(dirty).lower()}
@@ -158,18 +161,13 @@ def log_to_mlflow(
     tags["platform"] = "databricks" if payload["platform"]["databricks_runtime"] else "local"
     config = TrackingConfig.from_env(mlflow_root, env)
     tracked = log_uplift_run(
-        run, output_dir / "model", config=config, tags=tags, report_files=[output_dir / REPORT_NAME]
+        run,
+        output_dir / "model",
+        config=config,
+        tags=tags,
+        report_files=[output_dir / REPORT_NAME],
+        extra_metrics=outcome_metrics(payload, run.config.outcome),
     )
-    import mlflow
-
-    extra: dict[str, float] = {f"stage/{k}": v for k, v in payload["timings"].items()}
-    for outcome, result in payload["outcomes"].items():
-        if outcome != run.config.outcome:
-            evaluation = result["evaluation"]
-            extra.update(flatten_metrics({"ate": evaluation["ate"]}, f"{outcome}/"))
-            extra.update(flatten_metrics(evaluation["models"], f"{outcome}/"))
-    with mlflow.start_run(run_id=tracked.run_id):
-        mlflow.log_metrics(extra)
     return vars(tracked)
 
 

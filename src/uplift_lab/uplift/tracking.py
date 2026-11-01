@@ -94,6 +94,49 @@ def flatten_metrics(node: Mapping[str, Any], prefix: str = "") -> dict[str, floa
     return metrics
 
 
+#: Databricks rejects more than 1,000 metrics linked to one MLflow 3 LoggedModel. ``log_model``
+#: links every metric the run already has, and metrics logged afterwards are linked too, so the
+#: run logs one curated set (well under the cap) in a single step before the model. The full
+#: evaluation travels in the JSON report artifact.
+MAX_RUN_METRICS = 1000
+#: Policy-table columns logged as metrics; the rest (shares, treat-all, random per user) follow
+#: from these and the ATE, and are in the JSON report.
+LOGGED_POLICY_FIELDS = (
+    "model_per_1000_contacts",
+    "model_ipw_per_1000_contacts",
+    "gain_over_random_per_1000_contacts",
+)
+
+
+def evaluation_metrics(evaluation: Mapping[str, Any], prefix: str = "") -> dict[str, float]:
+    """The curated metric set of one evaluation payload (about 300 for five scorings)."""
+    models = {
+        name: {
+            **{k: v for k, v in model.items() if k != "policy"},
+            "policy": {
+                budget: {k: row[k] for k in LOGGED_POLICY_FIELDS}
+                for budget, row in model["policy"].items()
+            },
+        }
+        for name, model in evaluation["models"].items()
+    }
+    return {
+        **flatten_metrics({"ate": evaluation["ate"]}, prefix),
+        **flatten_metrics(models, prefix),
+        **flatten_metrics({"qini_diff_vs_best": evaluation["qini_diff_vs_best"]}, prefix),
+        **flatten_metrics({"propensity_auc": evaluation["propensity_check"]["auc"]}, prefix),
+    }
+
+
+def outcome_metrics(payload: Mapping[str, Any], registered_outcome: str) -> dict[str, float]:
+    """Stage timings and every other outcome's curated metrics, for a multi-outcome job."""
+    extra: dict[str, float] = {f"stage/{k}": float(v) for k, v in payload["timings"].items()}
+    for outcome, result in payload["outcomes"].items():
+        if outcome != registered_outcome:
+            extra.update(evaluation_metrics(result["evaluation"], f"{outcome}/"))
+    return extra
+
+
 def log_uplift_run(
     run: UpliftRun,
     model_dir: Path,
@@ -101,8 +144,14 @@ def log_uplift_run(
     config: TrackingConfig,
     tags: Mapping[str, str],
     report_files: Sequence[Path] = (),
+    extra_metrics: Mapping[str, float] | None = None,
 ) -> TrackedRun:
-    """Log ``run`` to MLflow and register the model in ``model_dir`` as the champion."""
+    """Log ``run`` to MLflow and register the model in ``model_dir`` as the champion.
+
+    ``extra_metrics`` (e.g. other outcomes, stage timings) are logged with the run's own metrics,
+    all before the model and nothing after it: MLflow 3 links the run's metrics to the
+    LoggedModel, where Databricks caps them at ``MAX_RUN_METRICS``.
+    """
     try:
         import mlflow
         from mlflow.models import ModelSignature
@@ -127,13 +176,12 @@ def log_uplift_run(
         "n_train": run.n_train,
         "n_test": run.n_test,
     }
-    metrics = {
-        **flatten_metrics({"ate": evaluation["ate"]}),
-        **flatten_metrics(evaluation["models"]),
-        **flatten_metrics({"qini_diff_vs_best": evaluation["qini_diff_vs_best"]}),
-        **flatten_metrics({"propensity_auc": evaluation["propensity_check"]["auc"]}),
-        **run.timings,
-    }
+    metrics = {**evaluation_metrics(evaluation), **run.timings, **(extra_metrics or {})}
+    if len(metrics) >= MAX_RUN_METRICS:
+        raise ValueError(
+            f"{len(metrics)} metrics would exceed the {MAX_RUN_METRICS}-metric cap; "
+            "keep the detail in the JSON report"
+        )
     signature = ModelSignature(
         inputs=Schema([ColSpec("double", name) for name in run.features]),
         outputs=Schema([ColSpec("double", "uplift")]),
@@ -151,7 +199,7 @@ def log_uplift_run(
                 "champion_reason": champion["reason"],
             }
         )
-        mlflow.log_metrics(metrics)
+        mlflow.log_metrics(metrics)  # the only metric call: log_model links these to the model
         for path in report_files:
             mlflow.log_artifact(str(path), artifact_path="report")
         info = mlflow.pyfunc.log_model(

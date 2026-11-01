@@ -15,6 +15,7 @@ from uplift_lab.data.cache import ChecksumError, RemoteFile, sha256_file
 from uplift_lab.pipelines import criteo_full_training as job
 from uplift_lab.pipelines.criteo_full_data import check_source, read_criteo_csv
 from uplift_lab.uplift.artifacts import load_learner, read_manifest
+from uplift_lab.uplift.tracking import MAX_RUN_METRICS
 
 N_ROWS = 6_000
 SMALL_ARGS = ["--n-estimators", "30", "--n-bootstrap", "20", "--learners", "s_learner", "t_learner"]
@@ -152,6 +153,14 @@ def test_job_logs_and_registers_with_mlflow(
     assert "conversion/ate" in run.data.metrics
     assert "conversion/s_learner/qini_coefficient_ci_low" in run.data.metrics
     assert "stage/read_csv_seconds" in run.data.metrics
+    # MLflow 3 links the run's metrics to the LoggedModel, where Databricks caps them at 1,000.
+    # Everything is logged once, before log_model, so the linked set is exactly the run's.
+    (logged,) = mlflow.search_logged_models(
+        experiment_ids=[tracked["experiment_id"]], output_format="list"
+    )
+    linked = {metric.key for metric in logged.metrics or []}
+    assert linked == set(run.data.metrics)
+    assert len(linked) < MAX_RUN_METRICS
     model = mlflow.pyfunc.load_model("models:/criteo-full-test@champion")
     rows = read_criteo_csv(source, expected_rows=None).head(50)
     scored = model.predict(rows)

@@ -18,10 +18,13 @@ from uplift_lab.uplift.pipeline import UpliftConfig, run_uplift
 from uplift_lab.uplift.provenance import build_info, frame_sha256, git_state, job_git_state
 from uplift_lab.uplift.tracking import (
     CHAMPION_ALIAS,
+    MAX_RUN_METRICS,
     PYFUNC_REQUIREMENTS,
     TrackingConfig,
     code_paths,
+    evaluation_metrics,
     flatten_metrics,
+    outcome_metrics,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +77,31 @@ def test_pyfunc_declares_the_package_code_and_its_dependencies() -> None:
     }
     assert core <= set(PYFUNC_REQUIREMENTS)
     assert "mlflow" in PYFUNC_REQUIREMENTS
+
+
+def test_full_job_metric_count_stays_under_the_logged_model_cap() -> None:
+    # The full job's shape: four learners plus random, four budgets, two outcomes.
+    frame = synthetic_uplift_frame(3_000, seed=5)
+    params = LgbmParams(n_estimators=10)
+    runs = {
+        outcome: run_uplift(frame, UpliftConfig(outcome=outcome, params=params, n_bootstrap=5))
+        for outcome in ("visit", "conversion")
+    }
+    timings = {f"stage_{i}_seconds": 1.0 for i in range(20)}
+    payload = {
+        "timings": timings,
+        "outcomes": {name: {"evaluation": run.evaluation} for name, run in runs.items()},
+    }
+    visit = runs["visit"]
+    total = {
+        **evaluation_metrics(visit.evaluation),
+        **visit.timings,
+        **outcome_metrics(payload, "visit"),
+    }
+    assert "conversion/s_learner/qini_coefficient" in total
+    assert "stage/stage_0_seconds" in total
+    # Measured 632; the old full set (every policy column, logged in two steps) exceeded 1,000.
+    assert len(total) < 0.7 * MAX_RUN_METRICS
 
 
 def test_build_info_and_job_git_state(tmp_path: Path) -> None:

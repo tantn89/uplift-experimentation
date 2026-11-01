@@ -10,6 +10,8 @@ resources:
       tasks:
         - task_key: train
           environment_key: uplift
+          # The job is deterministic: a failure would repeat on retry and burn an hour of quota.
+          max_retries: 0
           spark_python_task:
             python_file: ../train_criteo_full.py
             parameters:
