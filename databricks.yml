@@ -1,0 +1,39 @@
+# Databricks Asset Bundle: the full-data Criteo uplift training job (see docs/databricks-run.md).
+# Deploy with `databricks bundle deploy -p <profile>`; the workspace host comes from the profile.
+bundle:
+  name: uplift-lab
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for the schema, data Volume and registered model
+    default: workspace
+  schema:
+    description: Schema holding the Volume and the registered model
+    default: uplift_lab
+  volume:
+    description: Volume holding the Criteo source, the wheel and the job outputs
+    default: raw
+  model_name:
+    description: Registered model name inside catalog.schema
+    default: uplift_criteo_visit
+  n_bootstrap:
+    description: Paired bootstrap draws for every confidence interval
+    default: "200"
+
+workspace:
+  # Libraries go to the Volume: Free Edition is serverless-only and has no DBFS library root.
+  artifact_path: /Volumes/${var.catalog}/${var.schema}/${var.volume}/bundle/${workspace.current_user.short_name}/${bundle.target}
+
+artifacts:
+  uplift_lab_wheel:
+    type: whl
+    path: .
+    build: python -m pip wheel --no-deps --wheel-dir dist .
+
+include:
+  - databricks/resources/*.yml
+
+targets:
+  dev:
+    default: true
+    mode: development

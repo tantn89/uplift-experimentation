@@ -1,0 +1,44 @@
+# Serverless Python script job: verify the Criteo source on the Volume, train and evaluate every
+# learner on all 13,979,592 rows (visit and conversion), register the best visit model in Unity
+# Catalog as catalog.schema.model_name@champion and copy the outputs to the Volume.
+resources:
+  jobs:
+    criteo_full_uplift:
+      name: uplift-lab criteo full training
+      max_concurrent_runs: 1
+      timeout_seconds: 10800
+      tasks:
+        - task_key: train
+          environment_key: uplift
+          spark_python_task:
+            python_file: ../train_criteo_full.py
+            parameters:
+              - --source
+              - /Volumes/${var.catalog}/${var.schema}/${var.volume}/criteo/criteo-research-uplift-v2.1.csv.gz
+              - --output-dir
+              - /tmp/uplift-lab/criteo-full
+              - --publish-dir
+              - /Volumes/${var.catalog}/${var.schema}/${var.volume}/runs/{{job.run_id}}
+              - --n-bootstrap
+              - ${var.n_bootstrap}
+              - --git-sha
+              - ${bundle.git.commit}
+              - --mlflow
+              - --tracking-uri
+              - databricks
+              - --registry-uri
+              - databricks-uc
+              - --experiment
+              - /Users/${workspace.current_user.userName}/uplift-criteo
+              - --model-name
+              - ${var.catalog}.${var.schema}.${var.model_name}
+      environments:
+        - environment_key: uplift
+          spec:
+            environment_version: "4"
+            dependencies:
+              # Built from this repository by the bundle's artifact step.
+              - ../../dist/*.whl
+              # Same versions as the local runs, so boosters and MLflow behave identically.
+              - lightgbm==4.7.0
+              - mlflow==3.17.2
