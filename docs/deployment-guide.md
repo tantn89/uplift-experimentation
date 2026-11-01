@@ -116,10 +116,34 @@ registry credentials (e.g. `DATABRICKS_HOST`/`DATABRICKS_TOKEN` from Secret Mana
 local sqlite tracking store additionally needs `sqlalchemy`. Baking stays the recommended path
 for Cloud Run.
 
-## Cloud Run (pending: not run yet, needs approval)
+## Cloud Run
 
-These commands target project `filings-copilot` in `asia-southeast1`. **None of them has been
-run.** They create billable resources and need the owner's approval.
+These commands target project `filings-copilot` in `asia-southeast1`. They create billable
+resources.
+
+### Live deployment (2026-11-01)
+
+The commands below were run as written, except that the build baked the model trained on the
+full Criteo data on Databricks:
+`--build-arg MODEL_DIR=reports/databricks/286670365587179/model`. That is the transformed-outcome
+learner, git SHA `740f074`; see [databricks-run.md](databricks-run.md).
+
+- **Service:** `uplift-serve`, revision `uplift-serve-00001-bbc`. Image `uplift-serve:0.1.0`.
+- **Access:** an anonymous call gets 403; an identity token gets 200.
+- **Latency:** the benchmark ran from Vietnam with 200 sequential requests per case.
+  "Server" is Cloud Run's request latency, taken from the logs for 400 `/score` requests.
+
+| Case | Client p50 / p95 | Server p50 / p95 |
+|---|---|---|
+| `/score` batch 1 | 72.2 / 78.0 ms | 6.9 / 9.6 ms (`/score`, both batch sizes) |
+| `/decide` batch 1 | 71.6 / 76.1 ms | |
+| `/score` batch 100 | 88.3 / 96.4 ms | |
+| `/decide` batch 100 | 90.3 / 95.6 ms | |
+
+Most of the client latency is the network round trip from Vietnam to Singapore.
+
+- **Budget:** the project already has a monthly budget ("filings-copilot monthly", in the
+  billing account's currency, about USD 5), so no second budget was added.
 
 ```bash
 PROJECT=filings-copilot

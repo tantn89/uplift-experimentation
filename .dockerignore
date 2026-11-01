@@ -6,5 +6,6 @@
 !LICENSE
 !src/
 !reports/criteo-uplift/model/
+!reports/databricks/*/model/
 **/__pycache__
 **/*.py[cod]
