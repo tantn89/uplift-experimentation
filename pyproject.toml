@@ -75,8 +75,13 @@ strict = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "lightgbm.*", "sklearn.*", "statsmodels.*"]
+module = ["pyarrow.*", "lightgbm.*", "sklearn.*", "statsmodels.*", "mlflow.*"]
 ignore_missing_imports = true
+
+# MLflow is an optional extra: without it installed, PythonModel is untyped (Any).
+[[tool.mypy.overrides]]
+module = ["uplift_lab.uplift.pyfunc_model"]
+disallow_subclassing_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

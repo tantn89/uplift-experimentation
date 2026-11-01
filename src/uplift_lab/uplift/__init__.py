@@ -4,6 +4,7 @@ MLflow support lives in ``uplift_lab.uplift.tracking`` and is imported only when
 core package works without the ``mlflow`` extra.
 """
 
+from uplift_lab.uplift.artifacts import ArtifactError, load_learner, read_manifest, save_learner
 from uplift_lab.uplift.bootstrap import Interval, bootstrap_intervals, bootstrap_weights
 from uplift_lab.uplift.evaluation import decile_table, evaluate_scores
 from uplift_lab.uplift.features import LeakageError, check_features, feature_matrix
@@ -33,6 +34,7 @@ from uplift_lab.uplift.policy import PolicyValue, average_treatment_effect, poli
 
 __all__ = [
     "LEARNERS",
+    "ArtifactError",
     "Gains",
     "Interval",
     "LeakageError",
@@ -56,11 +58,14 @@ __all__ = [
     "evaluate_scores",
     "feature_matrix",
     "gains",
+    "load_learner",
     "make_learner",
     "policy_value",
     "qini_coefficient",
     "qini_curve",
+    "read_manifest",
     "run_uplift",
+    "save_learner",
     "split_train_test",
     "uplift_at_k",
     "uplift_curve",
