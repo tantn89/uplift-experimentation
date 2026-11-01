@@ -23,3 +23,5 @@ mlruns/
 mlartifacts/
 .claude/
 plans/
+# Databricks Asset Bundle local state.
+.databricks/
