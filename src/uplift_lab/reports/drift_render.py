@@ -70,6 +70,14 @@ def psi_table(payload: dict[str, Any]) -> Table:
 def _intro(payload: dict[str, Any]) -> list[str]:
     t, model, ref = payload["thresholds"], payload["model"], payload["reference"]
     rows = payload["config"]["traffic_rows"]
+    first: dict[str, Any] = next(iter(payload["scenarios"].values()), {})
+    tests = first.get("ks_tests")
+    ks = (
+        f"KS (Bonferroni: alpha {t['ks_alpha']:g} over {tests} tested columns, features and "
+        f"uplift score)"
+        if tests
+        else f"KS (Bonferroni alpha {t['ks_alpha']:g})"
+    )
     (low_warn, high_warn), (low_alert, high_alert) = t["rate_warn"], t["rate_alert"]
     return [
         f"Overall status: {payload['overall_status'].upper()}.",
@@ -77,7 +85,7 @@ def _intro(payload: dict[str, Any]) -> list[str]:
         f"rows of {ref['n_held_out']:,} held-out rows (seed {payload['config']['seed']}).",
         f"Model: {model['kind']} from {model['source']}.",
         f"PSI on reference deciles: warn >= {t['psi_warn']:g}, alert >= {t['psi_alert']:g}. "
-        f"KS (Bonferroni alpha {t['ks_alpha']:g}) is reported, not alerted on.",
+        f"{ks} is reported, not alerted on.",
         f"Decision rate: share of traffic at or above the budget-{payload['decision']['budget']} "
         f"threshold ({payload['decision']['threshold']:.5f}) divided by the budget; "
         f"warn outside [{low_warn:g}, {high_warn:g}], "

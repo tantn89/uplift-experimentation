@@ -2,7 +2,11 @@
 
 Each scenario resamples rows of the held-out set with replacement, with weights:
 
-- ``no_shift``: uniform. The same distribution as the reference, so nothing should flag.
+- ``no_shift``: uniform. The same distribution as the reference, so nothing should flag. It is
+  a sanity check, not an independent test: it resamples the very held-out rows that set the
+  decision threshold when the drift report fits its own model, so its decision rate is close
+  to the budget by construction. (An exported model brings the thresholds of its own test
+  set, which may overlap these rows as well.)
 - ``covariate_shift``: an exponential tilt towards high values of the chosen features,
   ``w = exp(strength * sum_f u_f)`` with ``u_f`` the percentile rank of feature ``f``. The
   marginals of those features move. Correlated features move with them, and that is real

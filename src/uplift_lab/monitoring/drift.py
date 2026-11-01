@@ -9,7 +9,8 @@ shift (alert). PSI hardly depends on sample size, which makes it the alerting st
 
 **KS** is reported as a second opinion. At serving volumes its p-value flags shifts far too
 small to matter, so it never raises the status on its own. Its rejection uses a Bonferroni
-level ``ks_alpha / number of columns``.
+level ``ks_alpha / m``, where ``m`` counts every tested column: the features plus the uplift
+score when it is present (13 for Criteo). The summary records ``m`` and the level.
 
 Prediction drift is the same pair of statistics on the model's uplift scores (column
 ``uplift``).
@@ -191,6 +192,8 @@ def drift_summary(
         "n": len(current),
         "status": max(statuses, key=STATUSES.index),
         "flagged_features": [name for name, r in results.items() if r["status"] != "ok"],
+        "ks_tests": len(columns),
+        "ks_level": level,
         "ks_rejected_features": [name for name, r in results.items() if r["ks_reject"]],
         "features": results,
         "prediction": prediction,

@@ -92,6 +92,9 @@ def test_injected_shift_is_flagged_on_the_right_feature() -> None:
     assert summary["flagged_features"] == ["f3", "f7"]
     assert summary["status"] == "alert"
     assert {"f3", "f7"} <= set(summary["ks_rejected_features"])
+    # Bonferroni over every tested column (here the features only; the uplift score adds one).
+    assert summary["ks_tests"] == len(FEATURE_NAMES)
+    assert summary["ks_level"] == pytest.approx(DriftThresholds().ks_alpha / len(FEATURE_NAMES))
     with pytest.raises(ValueError, match="missing"):
         drift_summary(profile, current.drop(columns="f2"), DriftThresholds())
 
