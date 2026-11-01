@@ -1,0 +1,78 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "uplift-lab"
+dynamic = ["version"]
+description = "A/B analysis (CUPED, SRM, power, always-valid sequential tests) and uplift modelling (meta-learners, Qini/AUUC, policy value) on public RCT data, deployed and monitored."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Tan Tran" }]
+keywords = ["uplift-modeling", "causal-inference", "ab-testing", "cuped", "sequential-testing",
+            "experimentation", "meta-learners", "qini", "mlflow"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Typing :: Typed",
+]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "pyarrow>=16",
+  "scipy>=1.13",
+  "scikit-learn>=1.5",
+  "lightgbm>=4.5",
+  "statsmodels>=0.14.2",
+  "platformdirs>=4.2",
+]
+
+[project.optional-dependencies]
+mlflow = ["mlflow>=3.0,<4"]
+serve = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2.8"]
+dev = [
+  "mypy>=1.11",
+  "pandas-stubs>=2.2",
+  "pytest>=8.3",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "scipy-stubs>=1.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/tantn89/uplift-experimentation"
+Issues = "https://github.com/tantn89/uplift-experimentation/issues"
+
+[tool.hatch.version]
+path = "src/uplift_lab/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/uplift_lab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*", "lightgbm.*", "sklearn.*", "statsmodels.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not network'"
+markers = ["network: downloads real datasets; run explicitly with -m network"]

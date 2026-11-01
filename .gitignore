@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+dist/
+build/
+*.egg-info/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Datasets are downloaded on demand and checksummed; never commit raw or derived data.
+/data/
+*.csv.gz
+*.parquet
+mlruns/
+mlartifacts/
+.claude/
+plans/
