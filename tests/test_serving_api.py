@@ -80,6 +80,21 @@ def test_missing_and_non_finite_features_are_rejected(client: TestClient) -> Non
     assert "finite number" in response.text and "input" not in response.json()["detail"][0]
 
 
+@pytest.mark.parametrize("value", [True, False, "12.5", "1", None, [1.0]])
+def test_features_must_be_json_numbers(client: TestClient, value: object) -> None:
+    body = payload(customers(1))
+    body["customers"][0]["f3"] = value
+    response = client.post("/score", json=body)
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "f3"
+
+
+def test_integer_and_large_finite_features_are_accepted(client: TestClient) -> None:
+    body = payload(customers(1))
+    body["customers"][0].update(f3=7, f4=1e308)
+    assert client.post("/score", json=body).status_code == 200
+
+
 def test_batch_size_is_capped(client: TestClient) -> None:
     assert client.post("/score", json={"customers": []}).status_code == 422
     frame = customers(MAX_BATCH + 1, seed=54)

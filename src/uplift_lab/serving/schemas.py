@@ -5,11 +5,15 @@ numbers, plus an optional caller ``id`` that is echoed back. Unknown fields are 
 treatment flag, ``exposure`` (post-treatment) and the outcomes are rejected with a leakage
 message, because a score must not depend on what happened after assignment. Batches hold 1 to
 ``MAX_BATCH`` customers.
+
+Features are strict: a JSON number (integer or float) is accepted, but a boolean or a numeric
+string (``true``, ``"12.5"``) is rejected instead of coerced. A client that sends those has a
+serialisation bug, and a coerced score would hide it.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,24 +21,26 @@ from uplift_lab.data.criteo import FEATURES
 from uplift_lab.uplift.features import NON_FEATURE_COLUMNS
 
 MAX_BATCH = 1000
+# Strict: int or float only (no bool, no numeric string); finiteness comes from the model config.
+Feature = Annotated[float, Field(strict=True)]
 
 
 class Customer(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     id: str | None = Field(default=None, max_length=64)
-    f0: float
-    f1: float
-    f2: float
-    f3: float
-    f4: float
-    f5: float
-    f6: float
-    f7: float
-    f8: float
-    f9: float
-    f10: float
-    f11: float
+    f0: Feature
+    f1: Feature
+    f2: Feature
+    f3: Feature
+    f4: Feature
+    f5: Feature
+    f6: Feature
+    f7: Feature
+    f8: Feature
+    f9: Feature
+    f10: Feature
+    f11: Feature
 
     @model_validator(mode="before")
     @classmethod
