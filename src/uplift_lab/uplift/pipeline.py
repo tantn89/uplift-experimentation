@@ -61,6 +61,9 @@ class UpliftRun:
     n_train: int
     n_test: int
     timings: dict[str, float]
+    # Test-set labels aligned with ``scores``, for callers that re-evaluate the same scorings.
+    test_treatment: FloatArray
+    test_outcome: FloatArray
 
 
 def split_train_test(
@@ -126,4 +129,15 @@ def run_uplift(
         alpha=config.alpha,
     )
     timings["propensity_check_seconds"] = time.perf_counter() - start
-    return UpliftRun(config, names, learners, scores, evaluation, len(train), len(test), timings)
+    return UpliftRun(
+        config,
+        names,
+        learners,
+        scores,
+        evaluation,
+        len(train),
+        len(test),
+        timings,
+        binary_array(test["treatment"], "treatment"),
+        binary_array(test[config.outcome], config.outcome),
+    )

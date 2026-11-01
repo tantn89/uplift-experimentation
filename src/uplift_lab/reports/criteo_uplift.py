@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,8 @@ def write_criteo_uplift_report(
     """Run the uplift pipeline on ``frame`` and write every output; returns the JSON payload."""
     run = run_uplift(frame, config, features)
     evaluation = run.evaluation
-    best = evaluation["best_model"]
+    champion = evaluation["champion"]
+    best = champion["model"]
     sha, dirty = git_state()
     dataset = {
         "n_rows": len(frame),
@@ -71,6 +72,8 @@ def write_criteo_uplift_report(
             "score": SCORE_NOTE,
             "budget_thresholds": thresholds,
             "test_qini_coefficient": evaluation["models"][best]["qini_coefficient"],
+            "champion_rule": champion["rule"],
+            "champion_reason": champion["reason"],
             "dataset": dataset,
             "n_train": run.n_train,
             "git_sha": sha,
@@ -84,7 +87,13 @@ def write_criteo_uplift_report(
         "n_test": run.n_test,
         "timings": run.timings,
         "git": {"sha": sha, "dirty": dirty},
-        "model": {"kind": best, "directory": str(model_dir), "budget_thresholds": thresholds},
+        "model": {
+            "kind": best,
+            "directory": str(model_dir),
+            "budget_thresholds": thresholds,
+            "champion_rule": champion["rule"],
+            "champion_reason": champion["reason"],
+        },
         "evaluation": evaluation,
         "mlflow": None,
     }
@@ -109,6 +118,19 @@ def write_criteo_uplift_report(
     return payload
 
 
+def pairwise_lines(evaluation: Mapping[str, Any]) -> list[str]:
+    """One line per paired Qini difference against the best, with raw and Holm p-values."""
+    lines = []
+    for name, diff in evaluation["qini_diff_vs_best"].items():
+        holm = diff.get("p_holm")
+        lines.append(
+            f"  Qini {name} - best {diff['estimate']:+.5f} "
+            f"[{diff['ci_low']:+.5f}, {diff['ci_high']:+.5f}] (paired), p {diff['p_value']:.3f}"
+            + ("" if holm is None else f", Holm {holm:.3f}")
+        )
+    return lines
+
+
 def _summary_lines(payload: dict[str, Any]) -> list[str]:
     evaluation = payload["evaluation"]
     ate = evaluation["ate"]
@@ -124,14 +146,12 @@ def _summary_lines(payload: dict[str, Any]) -> list[str]:
             f"(treat-all {policy['treat_all_per_1000_contacts']['estimate']:.1f})"
         )
     lines.append(
-        f"best {payload['model']['kind']}, beats random: {evaluation['best_beats_random']}, "
-        f"clear winner over the other learners: {evaluation['best_is_clear_winner']}"
+        f"best by Qini {evaluation['best_model']}, beats random: "
+        f"{evaluation['best_beats_random']}, clear winner (Holm): "
+        f"{evaluation['best_is_clear_winner']}"
     )
-    for name, diff in evaluation["qini_diff_vs_best"].items():
-        lines.append(
-            f"  Qini {name} - best {diff['estimate']:+.5f} "
-            f"[{diff['ci_low']:+.5f}, {diff['ci_high']:+.5f}] (paired)"
-        )
+    lines.extend(pairwise_lines(evaluation))
+    lines.append(f"champion {payload['model']['kind']}: {evaluation['champion']['reason']}")
     check = evaluation["propensity_check"]
     auc = check["auc"]
     lines.append(

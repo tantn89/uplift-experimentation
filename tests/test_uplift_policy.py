@@ -6,9 +6,15 @@ import numpy as np
 import pytest
 
 from synthetic_uplift import synthetic_uplift_frame, true_uplift
-from uplift_lab.uplift.bootstrap import bootstrap_intervals, bootstrap_weights
+from uplift_lab.uplift.bootstrap import (
+    bootstrap_intervals,
+    bootstrap_p_value,
+    bootstrap_weights,
+    holm_adjust,
+)
+from uplift_lab.uplift.champion import CHAMPION_RULE, select_champion
 from uplift_lab.uplift.evaluation import RANDOM_SCORER, decile_table, evaluate_scores
-from uplift_lab.uplift.metrics import Ranking, gains
+from uplift_lab.uplift.metrics import Ranking, gains, qini_coefficient
 from uplift_lab.uplift.policy import average_treatment_effect, policy_value
 
 SCORES = np.arange(8, 0, -1, dtype=float)
@@ -117,7 +123,8 @@ def test_paired_qini_differences_separate_signal_from_noise() -> None:
     tau = true_uplift(frame)
     noise = np.random.default_rng(2).normal(scale=1e-6, size=tau.size)
     scores = {"oracle": tau, "oracle_jitter": tau + noise, "weak": -tau}
-    payload = evaluate_scores(scores, frame["treatment"], frame["visit"], n_bootstrap=60, seed=3)
+    # Two Holm-corrected comparisons: 100 draws let the p-value reach 2 * 2/101 < 0.05.
+    payload = evaluate_scores(scores, frame["treatment"], frame["visit"], n_bootstrap=100, seed=3)
     diffs = payload["qini_diff_vs_best"]
     best = payload["best_model"]
     assert best in {"oracle", "oracle_jitter"} and best not in diffs
@@ -126,11 +133,89 @@ def test_paired_qini_differences_separate_signal_from_noise() -> None:
     assert diffs[twin]["ci_low"] <= 0.0 <= diffs[twin]["ci_high"] + 1e-12
     assert diffs[twin]["ci_high"] - diffs[twin]["ci_low"] < 1e-3
     assert diffs["weak"]["ci_high"] < 0
+    assert diffs["weak"]["p_holm"] <= 0.05 < diffs[twin]["p_holm"]
     assert payload["best_is_clear_winner"] is False
-    clear = evaluate_scores(
+    assert payload["champion"]["tied_with_best"] == [twin]
+    # With 30 draws the smallest attainable p-value is 2/31 > 0.05: no winner can be named.
+    too_few = evaluate_scores(
         {"oracle": tau, "weak": -tau}, frame["treatment"], frame["visit"], n_bootstrap=30, seed=3
     )
+    assert too_few["best_is_clear_winner"] is False
+    clear = evaluate_scores(
+        {"oracle": tau, "weak": -tau}, frame["treatment"], frame["visit"], n_bootstrap=60, seed=3
+    )
     assert clear["best_is_clear_winner"] is True
+    assert clear["champion"]["model"] == "oracle"
+    assert clear["champion"]["rule"] == CHAMPION_RULE
+
+
+def test_champion_rule_prefers_the_simplest_tied_learner() -> None:
+    frame = synthetic_uplift_frame(20_000, seed=8, treated_share=0.5)
+    tau = true_uplift(frame)
+    jitter = np.random.default_rng(2).normal(scale=1e-6, size=tau.size)
+    # The transformed outcome scores best by a hair; S-learner ties with it; T is much worse.
+    scores = {"transformed_outcome": tau, "s_learner": tau + jitter, "t_learner": -tau}
+    payload = evaluate_scores(scores, frame["treatment"], frame["visit"], n_bootstrap=100, seed=3)
+    champion = payload["champion"]
+    assert champion["best_by_qini"] in {"transformed_outcome", "s_learner"}
+    assert champion["model"] == "s_learner"
+    twin = ({"transformed_outcome", "s_learner"} - {champion["best_by_qini"]}).pop()
+    assert champion["tied_with_best"] == [twin]  # T is significantly worse, so not tied
+    assert champion["reason"].startswith("no clear winner")
+    assert payload["best_is_clear_winner"] is False
+
+
+def test_select_champion_rule() -> None:
+    order = ["s_learner", "t_learner", "x_learner", "transformed_outcome"]
+    tied = select_champion("transformed_outcome", order[:3], {n: 0.4 for n in order[:3]}, 0.05)
+    assert tied["model"] == "s_learner" and tied["tied_with_best"] == order[:3]
+    partial = select_champion(
+        "x_learner",
+        ["s_learner", "t_learner", "transformed_outcome"],
+        {"s_learner": 0.001, "t_learner": 0.2, "transformed_outcome": 0.3},
+        0.05,
+    )
+    assert partial["model"] == "t_learner"  # S is significantly worse; T is the simplest tie
+    clear = select_champion("x_learner", ["s_learner"], {"s_learner": 0.01}, 0.05)
+    assert clear["model"] == "x_learner" and "clear winner" in clear["reason"]
+    missing = select_champion("x_learner", ["s_learner"], {"s_learner": float("nan")}, 0.05)
+    assert missing["model"] == "s_learner"
+    alone = select_champion("t_learner", [], {}, 0.05)
+    assert alone["model"] == "t_learner"
+    with pytest.raises(ValueError, match="alpha"):
+        select_champion("t_learner", [], {}, 1.5)
+
+
+def test_holm_and_bootstrap_p_values() -> None:
+    assert holm_adjust({"a": 0.01, "b": 0.04, "c": 0.03}) == pytest.approx(
+        {"a": 0.03, "b": 0.06, "c": 0.06}
+    )
+    assert holm_adjust({"a": 0.5, "b": float("nan")})["a"] == pytest.approx(0.5)
+    assert np.isnan(holm_adjust({"b": float("nan")})["b"])
+    below = -np.linspace(1.0, 2.0, 99)
+    assert bootstrap_p_value(below) == pytest.approx(2.0 / 100.0)
+    assert bootstrap_p_value(np.concatenate([below, -below])) == pytest.approx(1.0)
+    assert np.isnan(bootstrap_p_value(np.array([np.nan, np.nan])))
+
+
+def test_replicates_that_lose_an_arm_are_dropped() -> None:
+    # 1 control and 19 treated users: about a third of the resamples contain no control user.
+    treatment = np.array([0] + [1] * 19)
+    outcome = np.array([0, 1] * 10)
+    scores = {"a": np.arange(20.0), "b": np.arange(20.0)[::-1]}
+    payload = evaluate_scores(scores, treatment, outcome, budgets=(0.5,), n_bootstrap=50, seed=4)
+    qini = payload["models"]["a"]["qini_coefficient"]
+    assert np.isfinite([qini["estimate"], qini["ci_low"], qini["ci_high"]]).all()
+    assert np.isfinite(payload["ate"]["ci_low"])
+    weights = np.zeros(20)
+    weights[1:] = 1.0  # a replicate without the control user
+    g = gains(Ranking(scores["a"]), treatment, outcome, weights)
+    assert not g.has_both_arms
+    assert np.isnan(qini_coefficient(g)) and np.isnan(average_treatment_effect(g))
+    assert np.isnan(policy_value(g, 0.5).model_ipw_per_1000_contacts)
+    # The original sample is still validated: without any control user it is an error.
+    with pytest.raises(ValueError, match="both treated and control"):
+        evaluate_scores(scores, np.ones(20), outcome, n_bootstrap=5)
 
 
 def test_decile_table_partitions_rows() -> None:

@@ -8,9 +8,14 @@ from above.
 
 The best model is the non-random scoring with the highest full-sample Qini coefficient. For
 every other scoring the payload also holds ``qini_diff_vs_best``: its Qini coefficient minus the
-best one's, computed on the same bootstrap draws (paired). The best model is a clear winner only
-when every other learner's difference interval lies below zero; otherwise the ranking between
-learners is within noise and no winner should be named.
+best one's, computed on the same bootstrap draws (paired), with a two-sided bootstrap p-value.
+Across the learners (not the random scoring) those p-values are Holm-corrected (``p_holm``).
+The best model is a clear winner only when every other learner's Holm-adjusted difference is
+significant; otherwise the ranking between learners is within noise and no winner is named.
+``champion`` records the model to register under the pre-declared rule in ``champion.py``.
+
+The intervals hold the fitted models fixed and resample the test set only: they measure
+test-set sampling noise, not the variability of refitting on another training sample.
 """
 
 from __future__ import annotations
@@ -23,14 +28,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from uplift_lab.experiments.estimators import FloatArray
-from uplift_lab.uplift.bootstrap import bootstrap_intervals
+from uplift_lab.uplift.bootstrap import bootstrap_draws, bootstrap_p_value, holm_adjust
+from uplift_lab.uplift.champion import select_champion
 from uplift_lab.uplift.features import binary_array
 from uplift_lab.uplift.metrics import (
     Gains,
     Ranking,
+    SortedSample,
     auuc,
     auuc_gain,
-    gains,
     qini_coefficient,
     qini_curve,
     uplift_at_k,
@@ -107,18 +113,22 @@ def evaluate_scores(
     """Metrics, paired bootstrap intervals, curves and deciles for every scoring in ``scores``."""
     if not scores:
         raise ValueError("at least one scoring is required")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
     t = binary_array(treatment, "treatment")
     y = binary_array(outcome, "outcome")
     rankings = {name: Ranking(values) for name, values in scores.items()}
     if any(r.size != t.size for r in rankings.values()) or y.size != t.size:
         raise ValueError("every scoring, treatment and outcome must have the same length")
+    # Validated (both arms present) and reordered once per ranking, reused by every replicate.
+    samples = {name: SortedSample(ranking, t, y) for name, ranking in rankings.items()}
     candidates = [name for name in scores if name != RANDOM_SCORER] or list(scores)
-    best = max(candidates, key=lambda n: qini_coefficient(gains(rankings[n], t, y)))
+    best = max(candidates, key=lambda n: qini_coefficient(samples[n].gains()))
 
     def statistic(weights: FloatArray | None) -> dict[str, float]:
         values: dict[str, float] = {}
-        for name, ranking in rankings.items():
-            g = gains(ranking, t, y, weights)
+        for name, sample in samples.items():
+            g = sample.gains(weights)
             values["ate"] = average_treatment_effect(g)
             for key, value in _point_metrics(g, budgets).items():
                 values[f"{name}{_SEP}{key}"] = value
@@ -129,10 +139,16 @@ def evaluate_scores(
                 values[f"{QINI_DIFF}{_SEP}{name}"] = qini - best_qini
         return values
 
-    intervals = bootstrap_intervals(statistic, t.size, n_boot=n_bootstrap, seed=seed, alpha=alpha)
-    flat = {name: interval.to_dict() for name, interval in intervals.items()}
+    result = bootstrap_draws(statistic, t.size, n_boot=n_bootstrap, seed=seed)
+    flat = {name: result.interval(name, alpha).to_dict() for name in result.point}
     models = _nest(flat)
     pairwise: dict[str, dict[str, float]] = models.pop(QINI_DIFF, {})
+    rivals = [name for name in candidates if name != best]
+    for name, diff in pairwise.items():
+        diff["p_value"] = bootstrap_p_value(result.draws[f"{QINI_DIFF}{_SEP}{name}"])
+    p_holm = holm_adjust({name: pairwise[name]["p_value"] for name in rivals})
+    for name, adjusted in p_holm.items():
+        pairwise[name]["p_holm"] = adjusted
     payload: dict[str, Any] = {
         "n_test": int(t.size),
         "treated_share": float(t.mean()),
@@ -144,8 +160,8 @@ def evaluate_scores(
         "curves": {},
         "deciles": {},
     }
-    for name, ranking in rankings.items():
-        g = gains(ranking, t, y)
+    for name, sample in samples.items():
+        g = sample.gains()
         qini_x, qini_y = qini_curve(g)
         uplift_x, uplift_y = uplift_curve(g)
         payload["curves"][name] = {
@@ -156,8 +172,7 @@ def evaluate_scores(
         payload["deciles"][name] = decile_table(scores[name], t, y)
     payload["best_model"] = best
     payload["best_beats_random"] = payload["models"][best]["qini_coefficient"]["ci_low"] > 0.0
-    rivals = [name for name in candidates if name != best]
-    payload["best_is_clear_winner"] = bool(rivals) and all(
-        pairwise[name]["ci_high"] < 0.0 for name in rivals
-    )
+    champion = select_champion(best, rivals, p_holm, alpha)
+    payload["best_is_clear_winner"] = bool(rivals) and not champion["tied_with_best"]
+    payload["champion"] = champion
     return payload
