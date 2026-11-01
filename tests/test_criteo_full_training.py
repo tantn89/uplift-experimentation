@@ -99,7 +99,7 @@ def test_job_trains_both_outcomes_and_publishes(
     assert set(payload["outcomes"]) == {"visit", "conversion"}
     assert payload["dataset"]["n_rows"] == N_ROWS
     assert payload["dataset"]["source"]["verified"] is True
-    assert payload["git"] == {"sha": "abc123", "dirty": None}
+    assert payload["git"] == {"sha": "abc123", "dirty": None, "source": "argument"}
     for stage in ("verify_source_seconds", "read_csv_seconds", "visit_seconds", "total_seconds"):
         assert payload["timings"][stage] >= 0.0
     visit = payload["outcomes"]["visit"]

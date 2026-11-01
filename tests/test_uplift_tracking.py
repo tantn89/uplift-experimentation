@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import tomllib
 from pathlib import Path
 
 import numpy as np
@@ -12,8 +15,16 @@ from synthetic_uplift import synthetic_uplift_frame
 from uplift_lab.uplift.artifacts import save_learner
 from uplift_lab.uplift.learners import LgbmParams
 from uplift_lab.uplift.pipeline import UpliftConfig, run_uplift
-from uplift_lab.uplift.provenance import frame_sha256, git_state
-from uplift_lab.uplift.tracking import CHAMPION_ALIAS, TrackingConfig, flatten_metrics
+from uplift_lab.uplift.provenance import build_info, frame_sha256, git_state, job_git_state
+from uplift_lab.uplift.tracking import (
+    CHAMPION_ALIAS,
+    PYFUNC_REQUIREMENTS,
+    TrackingConfig,
+    code_paths,
+    flatten_metrics,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_config_defaults_to_local_sqlite(tmp_path: Path) -> None:
@@ -49,6 +60,42 @@ def test_flatten_metrics_and_provenance() -> None:
     assert sha == "unknown" or len(sha) == 40
 
 
+def test_pyfunc_declares_the_package_code_and_its_dependencies() -> None:
+    # uplift_lab is not on PyPI: the registered model carries its source as code_paths...
+    (package,) = code_paths()
+    assert Path(package).name == "uplift_lab"
+    assert (Path(package) / "uplift" / "pyfunc_model.py").is_file()
+    assert (Path(package) / "uplift" / "artifacts.py").is_file()
+    # ...and pins every core dependency of the package (pyproject's [project] dependencies).
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    core = {
+        re.split(r"[<>=!~ \[]", spec, maxsplit=1)[0]
+        for spec in pyproject["project"]["dependencies"]
+    }
+    assert core <= set(PYFUNC_REQUIREMENTS)
+    assert "mlflow" in PYFUNC_REQUIREMENTS
+
+
+def test_build_info_and_job_git_state(tmp_path: Path) -> None:
+    info = tmp_path / "build_info.json"
+    assert build_info(info) is None
+    info.write_text(json.dumps({"git_sha": "abc", "git_dirty": True}), encoding="utf-8")
+    recorded = build_info(info)
+    assert recorded == {"git_sha": "abc", "git_dirty": True}
+    assert job_git_state("abc", recorded) == {
+        "sha": "abc",
+        "dirty": True,
+        "source": "wheel build info",
+    }
+    # A wheel built from another commit says nothing about this one.
+    assert job_git_state("def", recorded)["dirty"] is None
+    info.write_text(json.dumps({"git_sha": "abc", "git_dirty": "no"}), encoding="utf-8")
+    assert build_info(info) is None
+    info.write_text("{broken", encoding="utf-8")
+    assert build_info(info) is None
+    assert job_git_state(None, None)["source"] == "checkout"
+
+
 def test_log_and_register_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mlflow = pytest.importorskip("mlflow")
     from uplift_lab.uplift.tracking import log_uplift_run
@@ -75,9 +122,19 @@ def test_log_and_register_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyP
     logged = client.get_run(tracked.run_id).data
     assert logged.tags["git_sha"] == "abc"
     assert logged.tags["best_model"] == best
+    assert logged.tags["champion"] == run.evaluation["champion"]["model"]
+    assert logged.tags["champion_rule"] == run.evaluation["champion"]["rule"]
     assert logged.params["n_test"] == str(run.n_test)
     assert f"{best}/qini_coefficient_ci_low" in logged.metrics
     assert client.get_model_version_by_alias(tracking.model_name, CHAMPION_ALIAS).version == 1
-    model = mlflow.pyfunc.load_model(f"models:/{tracking.model_name}@{CHAMPION_ALIAS}")
+    uri = f"models:/{tracking.model_name}@{CHAMPION_ALIAS}"
+    # The logged model is self-contained: the package source and pinned requirements travel
+    # with it, so a clean environment needs only requirements.txt to load it.
+    local = Path(mlflow.artifacts.download_artifacts(uri, dst_path=str(tmp_path / "download")))
+    assert (local / "code" / "uplift_lab" / "uplift" / "pyfunc_model.py").is_file()
+    requirements = (local / "requirements.txt").read_text(encoding="utf-8")
+    for name in PYFUNC_REQUIREMENTS:
+        assert f"{name}==" in requirements
+    model = mlflow.pyfunc.load_model(uri)
     predicted = model.predict(frame.iloc[:50])
     np.testing.assert_allclose(predicted["uplift"], run.learners[best].predict(frame.iloc[:50]))

@@ -64,6 +64,9 @@ path = "src/uplift_lab/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uplift_lab"]
+# Written by databricks/build_wheel.py for a bundle deploy (git SHA and dirty flag); git-ignored,
+# so it has to be listed to enter the wheel. Absent in every other build.
+artifacts = ["src/uplift_lab/build_info.json"]
 
 [tool.ruff]
 line-length = 100

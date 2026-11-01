@@ -29,13 +29,13 @@ import pandas as pd
 
 from uplift_lab.data.criteo import CRITEO, DEFAULT_SEED, EXPECTED_ROWS, FEATURES
 from uplift_lab.pipelines.criteo_full_data import check_source, read_criteo_csv
-from uplift_lab.reports.criteo_uplift import sample_frame
+from uplift_lab.reports.criteo_uplift import pairwise_lines, sample_frame
 from uplift_lab.reports.output import write_json
 from uplift_lab.uplift.artifacts import save_learner
 from uplift_lab.uplift.evaluation import DEFAULT_BUDGETS
 from uplift_lab.uplift.learners import LEARNERS, LgbmParams
 from uplift_lab.uplift.pipeline import UpliftConfig, UpliftRun, budget_thresholds, run_uplift
-from uplift_lab.uplift.provenance import frame_sha256, git_state
+from uplift_lab.uplift.provenance import build_info, frame_sha256, job_git_state
 
 OUTCOMES = ("visit", "conversion")
 REPORT_NAME = "criteo-full.json"
@@ -97,7 +97,8 @@ def train_full(
         raise ValueError(f"register outcome {register_outcome!r} was not trained")
 
     evaluation = registered.evaluation
-    best = evaluation["best_model"]
+    champion = evaluation["champion"]
+    best = champion["model"]
     thresholds = budget_thresholds(registered.scores[best], registered.config.budgets)
     model_dir = output_dir / "model"
     if model_dir.exists():
@@ -110,9 +111,12 @@ def train_full(
             "score": score_note(register_outcome),
             "budget_thresholds": thresholds,
             "test_qini_coefficient": evaluation["models"][best]["qini_coefficient"],
+            "champion_rule": champion["rule"],
+            "champion_reason": champion["reason"],
             "dataset": dataset,
             "n_train": registered.n_train,
             "git_sha": git["sha"],
+            "git_dirty": git["dirty"],
         },
     )
     payload: dict[str, Any] = {
@@ -130,6 +134,8 @@ def train_full(
             "kind": best,
             "directory": str(model_dir),
             "budget_thresholds": thresholds,
+            "champion_rule": champion["rule"],
+            "champion_reason": champion["reason"],
         },
         "mlflow": None,
     }
@@ -235,14 +241,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     timings["frame_hash_seconds"] = time.perf_counter() - start
     print(f"loaded {len(frame):,} rows in {timings['read_csv_seconds']:.1f} s")
 
-    sha, dirty = (args.git_sha, None) if args.git_sha else git_state()
     payload, run = train_full(
         frame,
         args.output_dir,
         configs,
         register_outcome=args.register_outcome,
         dataset=dataset,
-        git={"sha": sha, "dirty": dirty},
+        git=job_git_state(args.git_sha, build_info()),
         timings=timings,
     )
     del frame
@@ -271,8 +276,10 @@ def summary_lines(payload: Mapping[str, Any]) -> list[str]:
         ate = evaluation["ate"]
         lines.append(
             f"[{outcome}] ATE {ate['estimate']:+.5f} [{ate['ci_low']:+.5f}, {ate['ci_high']:+.5f}]"
-            f"; best {evaluation['best_model']}, clear winner {evaluation['best_is_clear_winner']}"
+            f"; best {evaluation['best_model']}, clear winner (Holm) "
+            f"{evaluation['best_is_clear_winner']}, champion {evaluation['champion']['model']}"
         )
+        lines.extend(pairwise_lines(evaluation))
         for name, model in evaluation["models"].items():
             qini = model["qini_coefficient"]
             per_1k = model["policy"]["0.1"]["model_per_1000_contacts"]["estimate"]

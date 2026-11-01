@@ -13,8 +13,14 @@ Configuration comes from the environment, so the same code path runs locally and
   ``catalog.schema.model``).
 
 A run logs the configuration as params; metrics with CI bounds and timings; the git SHA, dataset
-checksums and best model as tags; the report files; and registers the best learner as a pyfunc
-model (``pyfunc_model.py`` wrapping the ``artifacts`` directory) under the alias ``champion``.
+checksums, best model and champion (with its rule) as tags; the report files; and registers the
+champion as a pyfunc model (``pyfunc_model.py`` wrapping the ``artifacts`` directory) under the
+alias ``champion``.
+
+The pyfunc imports ``uplift_lab``, which is not on PyPI. The package source is therefore logged
+with the model (``code_paths``; MLflow puts it on ``sys.path`` before loading), and the pip
+requirements pin its core runtime dependencies, so the registered model loads in a clean
+environment that has only those requirements installed.
 """
 
 from __future__ import annotations
@@ -132,9 +138,19 @@ def log_uplift_run(
         inputs=Schema([ColSpec("double", name) for name in run.features]),
         outputs=Schema([ColSpec("double", "uplift")]),
     )
+    champion = evaluation["champion"]
     with mlflow.start_run(experiment_id=experiment_id) as active:
         mlflow.log_params(params)
-        mlflow.set_tags({**tags, "best_model": evaluation["best_model"]})
+        mlflow.set_tags(
+            {
+                **tags,
+                "best_model": evaluation["best_model"],
+                "champion": champion["model"],
+                "champion_rule": champion["rule"],
+                # MLflow caps tag values at 8,000 characters; the reason is a sentence.
+                "champion_reason": champion["reason"],
+            }
+        )
         mlflow.log_metrics(metrics)
         for path in report_files:
             mlflow.log_artifact(str(path), artifact_path="report")
@@ -146,7 +162,8 @@ def log_uplift_run(
             # A synthetic all-zero row: MLflow checks the model scores it, and no data is copied.
             input_example=pd.DataFrame(0.0, index=[0], columns=list(run.features)),
             registered_model_name=config.model_name,
-            pip_requirements=_pip_requirements(),
+            pip_requirements=pip_requirements(),
+            code_paths=code_paths(),
         )
     version = str(info.registered_model_version)
     mlflow.MlflowClient().set_registered_model_alias(config.model_name, CHAMPION_ALIAS, version)
@@ -159,8 +176,20 @@ def log_uplift_run(
     )
 
 
-def _pip_requirements() -> list[str]:
+#: What loading and scoring the pyfunc imports besides ``uplift_lab`` itself: the package's core
+#: dependencies (``pyproject.toml``) plus MLflow.
+PYFUNC_REQUIREMENTS = ("lightgbm", "numpy", "pandas", "platformdirs", "mlflow")
+
+
+def pip_requirements() -> list[str]:
     """Pinned runtime requirements, so MLflow does not spend time inferring them."""
     from importlib.metadata import version
 
-    return [f"{name}=={version(name)}" for name in ("lightgbm", "numpy", "pandas", "mlflow")]
+    return [f"{name}=={version(name)}" for name in PYFUNC_REQUIREMENTS]
+
+
+def code_paths() -> list[str]:
+    """The ``uplift_lab`` package directory, logged with the model as its source code."""
+    import uplift_lab
+
+    return [str(Path(uplift_lab.__file__).resolve().parent)]

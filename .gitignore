@@ -23,5 +23,6 @@ mlruns/
 mlartifacts/
 .claude/
 plans/
-# Databricks Asset Bundle local state.
+# Databricks Asset Bundle local state, and the build provenance written into the bundle's wheel.
 .databricks/
+src/uplift_lab/build_info.json

@@ -17,8 +17,8 @@ variables:
     description: Registered model name inside catalog.schema
     default: uplift_criteo_visit
   n_bootstrap:
-    description: Paired bootstrap draws for every confidence interval
-    default: "200"
+    description: Paired bootstrap draws for every confidence interval (both outcomes)
+    default: "1000"
 
 workspace:
   # Libraries go to the Volume: Free Edition is serverless-only and has no DBFS library root.
@@ -28,7 +28,8 @@ artifacts:
   uplift_lab_wheel:
     type: whl
     path: .
-    build: python -m pip wheel --no-deps --wheel-dir dist .
+    # Cleans dist/ first (the job installs dist/*.whl) and records the git dirty flag in the wheel.
+    build: python databricks/build_wheel.py
 
 include:
   - databricks/resources/*.yml
