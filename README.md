@@ -141,8 +141,9 @@ rejected as a feature and every effect is intent-to-treat.
   everyone.**
 - **No learner wins on visit, so the pre-declared rule picks the S-learner.** The transformed
   outcome has the highest Qini point estimate, but its paired differences against S, T and X all
-  cover 0 (Holm-adjusted p 0.35, 0.65, 0.35). Under the champion rule fixed before the run, the
-  simplest tied learner is registered and served: the S-learner. It does not depend on a constant
+  cover 0 (Holm-adjusted p 0.35, 0.65, 0.35). The champion rule was committed before the
+  1,000-draw run, but after an earlier full-data run had already shown the tie, so it is
+  pre-declared for this run but not blind. Under it, the simplest tied learner is registered and served: the S-learner. It does not depend on a constant
   propensity, while the transformed outcome does, and treatment is slightly predictable (AUC
   0.5105 [0.5098, 0.5113]).
 - **Conversion is measurable only on the full data.** Its control arm has about 291 conversions in
@@ -274,7 +275,7 @@ other data, settings or library versions. Refresh the baseline in the same pull 
 - **No winner without a paired test, and a champion rule fixed in advance.** Point estimates rank
   the learners differently on the subsample and on the full data. The report names a winner only
   when every paired Qini difference against the best is significant after Holm correction. The
-  registered and served model follows a rule written before the run (`uplift/champion.py`): the
+  registered and served model follows a rule committed before the published run (`uplift/champion.py`): the
   clear winner if there is one, otherwise the first learner not significantly worse than the
   best in the order S > T > X > transformed outcome, simplest and least propensity-sensitive
   first. The rule and its reason are recorded in the manifest and the MLflow tags.
