@@ -54,6 +54,7 @@ uplift-hillstrom-report = "uplift_lab.reports.hillstrom:main"
 uplift-sequential-report = "uplift_lab.reports.sequential:main"
 uplift-criteo-report = "uplift_lab.reports.criteo_uplift:main"
 uplift-serve-benchmark = "uplift_lab.serving.benchmark:main"
+uplift-drift-report = "uplift_lab.reports.drift:main"
 
 [project.urls]
 Homepage = "https://github.com/tantn89/uplift-experimentation"

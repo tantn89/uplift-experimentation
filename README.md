@@ -97,6 +97,30 @@ The image bakes the exported model directory in, runs as a non-root user and has
 See [docs/deployment-guide.md](docs/deployment-guide.md) for configuration, the Docker design
 and the Cloud Run commands (not deployed yet).
 
+## Drift monitoring
+
+`uplift-drift-report` compares traffic with the training reference. Each feature and the
+uplift score get a PSI on the reference deciles (warn >= 0.1, alert >= 0.2, configurable) and a
+two-sample KS test (reported, Bonferroni-corrected, never alerting on its own). It also reports
+the share of traffic above the 10%-budget score threshold. Seeded scenarios resample the
+held-out split:
+
+- no shift;
+- a covariate tilt towards high `f0`/`f6`;
+- a treatment-mix change to 50/50;
+- a 3x visit-rate (label) shift.
+
+`--traffic-log` adds the serving log as an observed scenario.
+
+```bash
+uplift-drift-report --model-dir reports/criteo-uplift/model   # Criteo, about 6 s -> reports/drift
+uplift-drift-report --synthetic 20000                         # no download; what CI runs
+```
+
+Outputs are `drift.json`, `drift-psi.png`, `drift-report.md` and a self-contained
+`drift-report.html`. CI builds the synthetic report and uploads it as the `drift-report`
+artifact.
+
 ## Development
 
 ```bash
