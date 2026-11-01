@@ -11,17 +11,20 @@ Curves are expressed per user of the whole population, against the targeted frac
 
 The Qini coefficient is the area between the Qini curve and the straight line of random
 targeting (zero in expectation for a random ranking); AUUC is the area under the uplift curve and
-``auuc_gain`` its excess over random targeting, ``AUUC - U(1) / 2``. Empty arms contribute zero,
-as in scikit-uplift. Tied scores are evaluated only at the end of each tie group (linear in
-between), so the result does not depend on row order.
+``auuc_gain`` its excess over random targeting, ``AUUC - U(1) / 2``. An arm that is empty among
+the top ``k`` contributes zero there, as in scikit-uplift. Tied scores are evaluated only at the
+end of each tie group (linear in between), so the result does not depend on row order.
 
 Every statistic accepts optional non-negative ``weights`` (bootstrap multiplicities), which lets
-a bootstrap reuse one sort per model.
+a bootstrap reuse one sort per model. The unweighted sample must contain both arms. A weighted
+replicate in which one arm has zero total weight is undefined: every statistic of it is NaN, and
+the bootstrap drops it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -50,7 +53,11 @@ class Ranking:
 
 @dataclass(frozen=True)
 class Gains:
-    """Prefix sums in ranked order; index ``i`` covers the first ``i`` ranked users."""
+    """Prefix sums in ranked order; index ``i`` covers the first ``i`` ranked users.
+
+    The curves are cached, so the Qini coefficient, AUUC and AUUC gain of one replicate share
+    one pass over the tie-group ends.
+    """
 
     weight: FloatArray
     n_t: FloatArray
@@ -64,33 +71,79 @@ class Gains:
         return float(self.weight[-1])
 
     @property
+    def has_both_arms(self) -> bool:
+        """Whether both arms carry weight; statistics of a one-arm replicate are NaN."""
+        return bool(self.n_t[-1] > 0.0 and self.n_c[-1] > 0.0)
+
+    @cached_property
     def fraction(self) -> FloatArray:
         return self.weight[self.cuts] / self.total
+
+    @cached_property
+    def qini(self) -> FloatArray:
+        c = self.cuts
+        return (self.y_t[c] - self.y_c[c] * _ratio(self.n_t[c], self.n_c[c])) / self.total
+
+    @cached_property
+    def uplift(self) -> FloatArray:
+        c = self.cuts
+        rate_gap = _ratio(self.y_t[c], self.n_t[c]) - _ratio(self.y_c[c], self.n_c[c])
+        return rate_gap * self.fraction
 
 
 def _prefix(values: FloatArray) -> FloatArray:
     return np.concatenate([[0.0], np.cumsum(values)])
 
 
+class SortedSample:
+    """Treatment and outcome of a sample, validated once and reordered once per ranking.
+
+    A bootstrap evaluates the same rankings on many weight vectors; this keeps the validation
+    and the reordering of treatment and outcome out of the per-replicate work.
+    """
+
+    def __init__(self, ranking: Ranking, treatment: ArrayLike, outcome: ArrayLike) -> None:
+        t = binary_array(treatment, "treatment")
+        y = np.asarray(outcome, dtype=np.float64)
+        if not t.size == y.size == ranking.size:
+            raise ValueError("scores, treatment and outcome must have the same length")
+        if not np.isfinite(y).all():
+            raise ValueError("outcome must be finite")
+        if np.all(t == t[0]):
+            raise ValueError("both treated and control units are needed")
+        self.ranking = ranking
+        self.t = t[ranking.order]
+        self.y = y[ranking.order]
+        self.c = 1.0 - self.t
+
+    def gains(self, weights: ArrayLike | None = None) -> Gains:
+        """Prefix sums per arm under ``weights`` (``None``: every row once)."""
+        if weights is None:
+            w = np.ones(self.ranking.size)
+        else:
+            raw = np.asarray(weights, dtype=np.float64)
+            if raw.shape != (self.ranking.size,) or not (raw >= 0).all():
+                raise ValueError("weights must be non-negative, one per row")
+            w = raw[self.ranking.order]
+        wt, wc = w * self.t, w * self.c
+        return Gains(
+            _prefix(w),
+            _prefix(wt),
+            _prefix(wc),
+            _prefix(wt * self.y),
+            _prefix(wc * self.y),
+            self.ranking.cuts,
+        )
+
+
 def gains(
     ranking: Ranking, treatment: ArrayLike, outcome: ArrayLike, weights: ArrayLike | None = None
 ) -> Gains:
-    """Prefix sums of counts and outcomes per arm, in the ranking's order."""
-    t = binary_array(treatment, "treatment")
-    y = np.asarray(outcome, dtype=np.float64)
-    w = np.ones(ranking.size) if weights is None else np.asarray(weights, dtype=np.float64)
-    if not t.size == y.size == w.size == ranking.size:
-        raise ValueError("scores, treatment, outcome and weights must have the same length")
-    if not np.isfinite(y).all() or (w < 0).any():
-        raise ValueError("outcome must be finite and weights non-negative")
-    t, y, w = t[ranking.order], y[ranking.order], w[ranking.order]
-    wt, wc = w * t, w * (1.0 - t)
-    result = Gains(
-        _prefix(w), _prefix(wt), _prefix(wc), _prefix(wt * y), _prefix(wc * y), ranking.cuts
-    )
-    if result.n_t[-1] == 0 or result.n_c[-1] == 0:
-        raise ValueError("both treated and control units are needed")
-    return result
+    """Prefix sums of counts and outcomes per arm, in the ranking's order.
+
+    The unweighted sample must hold both arms; ``weights`` may still empty one (see module doc).
+    """
+    return SortedSample(ranking, treatment, outcome).gains(weights)
 
 
 def _ratio(numerator: FloatArray, denominator: FloatArray) -> FloatArray:
@@ -101,16 +154,12 @@ def _ratio(numerator: FloatArray, denominator: FloatArray) -> FloatArray:
 
 def qini_curve(g: Gains) -> tuple[FloatArray, FloatArray]:
     """Targeted fraction and Qini value per population user at each tie-group end."""
-    c = g.cuts
-    values = (g.y_t[c] - g.y_c[c] * _ratio(g.n_t[c], g.n_c[c])) / g.total
-    return g.fraction, values
+    return g.fraction, g.qini
 
 
 def uplift_curve(g: Gains) -> tuple[FloatArray, FloatArray]:
     """Targeted fraction and uplift-curve value per population user at each tie-group end."""
-    c = g.cuts
-    rate_gap = _ratio(g.y_t[c], g.n_t[c]) - _ratio(g.y_c[c], g.n_c[c])
-    return g.fraction, rate_gap * g.fraction
+    return g.fraction, g.uplift
 
 
 def _trapezoid(values: FloatArray, fraction: FloatArray) -> float:
@@ -123,18 +172,23 @@ def _area_over_random(fraction: FloatArray, values: FloatArray) -> float:
 
 def qini_coefficient(g: Gains) -> float:
     """Area between the Qini curve and random targeting; 0 in expectation for random scores."""
-    return _area_over_random(*qini_curve(g))
+    if not g.has_both_arms:
+        return float("nan")
+    return _area_over_random(g.fraction, g.qini)
 
 
 def auuc(g: Gains) -> float:
     """Area under the uplift curve (per population user, over the targeted fraction)."""
-    fraction, values = uplift_curve(g)
-    return _trapezoid(values, fraction)
+    if not g.has_both_arms:
+        return float("nan")
+    return _trapezoid(g.uplift, g.fraction)
 
 
 def auuc_gain(g: Gains) -> float:
     """AUUC minus the area under random targeting, ``U(1) / 2``."""
-    return _area_over_random(*uplift_curve(g))
+    if not g.has_both_arms:
+        return float("nan")
+    return _area_over_random(g.fraction, g.uplift)
 
 
 def top_count(g: Gains, budget: float) -> int:

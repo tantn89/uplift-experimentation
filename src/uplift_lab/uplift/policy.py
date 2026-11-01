@@ -5,8 +5,10 @@ rest untreated. Its incremental value over treating nobody is estimated two ways
 
 - **difference in means** among the targeted users (the primary estimate): the treated minus
   control outcome rate inside the targeted segment, i.e. inverse propensity weighting with
-  weights normalised within each arm of the segment (Hajek). It stays unbiased when the
-  segment's treated share drifts from the overall share;
+  weights normalised within each arm of the segment (Hajek). It adapts to the segment's own
+  treated share, so it is less biased than constant-propensity IPW when that share drifts from
+  the overall one. It is not unbiased in general: if the treated share still varies with the
+  features inside the segment, a propensity model (AIPW or propensity strata) is needed;
 - **Horvitz-Thompson IPW** with the overall test treatment share ``e``:
   ``z = y (t / e - (1 - t) / (1 - e))`` summed over targeted users. It is unbiased only if the
   treated share is the same in every segment. On Criteo the share in the top decile is 0.865
@@ -49,17 +51,23 @@ def _horvitz_thompson(g: Gains, j: int) -> float:
 
 
 def average_treatment_effect(g: Gains) -> float:
-    """Difference in outcome means between arms over the whole sample."""
+    """Difference in outcome means between arms over the whole sample; NaN with one arm."""
+    if not g.has_both_arms:
+        return float("nan")
     return float(g.y_t[-1] / g.n_t[-1] - g.y_c[-1] / g.n_c[-1])
 
 
 def policy_value(g: Gains, budget: float) -> PolicyValue:
-    """Value of treating the top ``budget`` share of the ranking behind ``g``."""
+    """Value of treating the top ``budget`` share of the ranking behind ``g``.
+
+    Every value but the targeted share is NaN for a replicate in which one arm is empty.
+    """
     j = top_count(g, budget)
     share = float(g.weight[j] / g.total)
     per_contact = uplift_at_k(g, budget)  # NaN when an arm is empty in the segment
     ate = average_treatment_effect(g)
-    ipw = _horvitz_thompson(g, j) / share if share > 0 else float("nan")
+    defined = share > 0 and g.has_both_arms
+    ipw = _horvitz_thompson(g, j) / share if defined else float("nan")
     return PolicyValue(
         budget=budget,
         targeted_share=share,
