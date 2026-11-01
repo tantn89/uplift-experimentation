@@ -14,6 +14,8 @@ This repo answers the two questions a growth team asks after every campaign, on 
 The model is trained on the full data on Databricks, served on Cloud Run and monitored for drift.
 Every statistical result below comes from a seeded script or job in this repository; its command
 and output field are listed in [docs/project-overview-pdr.md](docs/project-overview-pdr.md#evidence).
+
+> **Write-up:** [Peeking at your A/B test turns 5% false positives into 25%, and what mSPRT costs you](https://dev.to/tantn89/peeking-at-your-ab-test-turns-5-false-positives-into-25-and-what-msprt-costs-you-1cj0)
 Latency, image size, cold start and memory are measurements of one deployment, and the library
 comparison is a one-off spike: those vary between runs and releases.
 
